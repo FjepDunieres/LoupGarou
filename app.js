@@ -66,7 +66,7 @@ function initConfiguration() {
 // Lancement de l'application
 async function startApp() {
   try {
-    supabase = supabase.createClient(supabaseUrl, supabaseAnonKey);
+    supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
   } catch (err) {
     console.error("Erreur d'initialisation Supabase:", err);
     alert("Impossible de se connecter à Supabase. Vérifiez vos identifiants.");
@@ -983,25 +983,66 @@ function renderTableau() {
   const phaseSub = document.getElementById('tab-sub-phase');
   const timerBox = document.getElementById('tab-timer-box');
   const banner = document.getElementById('tab-announcement-banner');
+  const lobbyContainer = document.getElementById('tab-lobby-container');
+  const mainGrid = document.getElementById('tab-grid');
+
+  if (gameState.phase === 'lobby') {
+    lobbyContainer.classList.remove('hidden');
+    mainGrid.classList.add('hidden');
+    banner.classList.add('hidden');
+    
+    phaseSub.innerHTML = `Lobby d'inscription — Scannez le QR Code pour rejoindre`;
+    timerBox.classList.add('hidden');
+    
+    // Déterminer l'URL d'inscription
+    let joinUrl = "https://fjepdunieres.github.io/LoupGarou/";
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname.startsWith("192.168.")) {
+      joinUrl = window.location.origin + window.location.pathname + "?role=joueur";
+    }
+    
+    const lobbyPlayersGrid = document.getElementById('tab-lobby-players-list');
+    const lobbyCount = document.getElementById('tab-lobby-count');
+    const lobbyUrlLink = document.getElementById('tab-lobby-url');
+    const qrHolder = document.getElementById('tab-lobby-qr-holder');
+    
+    lobbyCount.textContent = total;
+    lobbyUrlLink.href = joinUrl;
+    lobbyUrlLink.textContent = joinUrl;
+    
+    qrHolder.innerHTML = `
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(joinUrl)}" alt="QR Code">
+    `;
+    
+    lobbyPlayersGrid.innerHTML = '';
+    if (players.length === 0) {
+      lobbyPlayersGrid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; color: var(--color-muted); padding: 40px 0;">
+          <p style="font-size: 1.1rem; animation: pulse-glow 2s infinite; color: var(--neon-blue);">En attente du premier villageois...</p>
+        </div>
+      `;
+    } else {
+      players.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'lobby-player-card';
+        card.innerHTML = `
+          <div class="p-num">N° ${p.number}</div>
+          <div class="p-name">${p.name}</div>
+        `;
+        lobbyPlayersGrid.appendChild(card);
+      });
+    }
+  } else {
+    lobbyContainer.classList.add('hidden');
+    mainGrid.classList.remove('hidden');
+  }
 
   // Arrêter l'ancien minuteur s'il tourne
   if (timerInterval) clearInterval(timerInterval);
 
   switch (gameState.phase) {
     case 'lobby':
-      phaseSub.innerHTML = `Lobby d'inscription — Scannez le QR Code pour rejoindre`;
-      timerBox.classList.add('hidden');
-      banner.classList.remove('hidden');
-      
-      // Afficher un QR Code dynamique pointant vers l'écran joueur
-      const joinUrl = window.location.origin + window.location.pathname + "?role=joueur";
-      banner.innerHTML = `
-        <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
-          <div>Rejoignez la partie en scannant le QR code :</div>
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(joinUrl)}" alt="QR Code" style="border: 4px solid white; border-radius:8px;">
-          <div style="font-size:1rem; color:var(--color-muted);">${joinUrl}</div>
-        </div>
-      `;
+      // Déjà géré ci-dessus
       break;
 
     case 'distributing':

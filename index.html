@@ -261,6 +261,28 @@
         Bienvenue ! En attente du lancement par le Game Master...
       </div>
 
+      <!-- Lobby split view (visible before game starts) -->
+      <div id="tab-lobby-container" class="tableau-lobby hidden">
+        <div class="lobby-qr-side glass">
+          <h2 class="title-glow" style="font-size: 1.8rem; margin-bottom: 10px;">📱 REJOINDRE LE JEU</h2>
+          <p style="color: var(--color-muted); margin-bottom: 25px; font-size: 0.95rem;">Scannez le QR Code pour rejoindre la partie avec votre téléphone.</p>
+          <div id="tab-lobby-qr-holder" class="qr-container">
+            <!-- QR code image dynamically inserted -->
+          </div>
+          <div style="margin-top: 25px; font-size: 0.95rem; color: var(--color-muted);">
+            Ou accédez à l'adresse :<br>
+            <a id="tab-lobby-url" href="#" class="join-url-link">https://fjepdunieres.github.io/LoupGarou/</a>
+          </div>
+        </div>
+        
+        <div class="lobby-players-side glass">
+          <h2 class="title-glow" style="font-size: 1.8rem; margin-bottom: 20px;">👥 VILLAGEOIS REJOINTS (<span id="tab-lobby-count">0</span>)</h2>
+          <div id="tab-lobby-players-list" class="lobby-players-grid">
+            <!-- Connected players rendered dynamically in JS -->
+          </div>
+        </div>
+      </div>
+
       <!-- Main Display Grid -->
       <div id="tab-grid" class="tableau-grid">
         <!-- Rendered in JS, 100 players grid -->
