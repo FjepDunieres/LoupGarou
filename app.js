@@ -272,11 +272,18 @@ function setupPlayerSubscriptions() {
     })
     .subscribe();
 
-  // Charger l'état actuel immédiatement
-  supabase.from('game_state').select('*').eq('id', 1).single().then(({ data }) => {
+  // Charger l'état actuel immédiatement (auto-création si absent pour résilience)
+  supabase.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
     if (data) {
       gameState = data;
       handleGameStateUpdate();
+    } else {
+      console.log("Game state non trouvé, initialisation par défaut...");
+      const { data: newGS } = await supabase.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
+      if (newGS) {
+        gameState = newGS;
+        handleGameStateUpdate();
+      }
     }
   });
 
@@ -954,11 +961,19 @@ async function initTableau() {
 
   // Chargement initial
   await syncTableauData();
-  const { data } = await supabase.from('game_state').select('*').eq('id', 1).single();
-  if (data) {
-    gameState = data;
-    renderTableau();
-  }
+  supabase.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
+    if (data) {
+      gameState = data;
+      renderTableau();
+    } else {
+      console.log("Game state non trouvé (Tableau), initialisation par défaut...");
+      const { data: newGS } = await supabase.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
+      if (newGS) {
+        gameState = newGS;
+        renderTableau();
+      }
+    }
+  });
 }
 
 async function syncTableauData() {
@@ -970,6 +985,11 @@ async function syncTableauData() {
 }
 
 function renderTableau() {
+  if (!gameState || !gameState.phase) {
+    console.log("Game state not yet loaded, skipping renderTableau.");
+    return;
+  }
+
   // 1. Mettre à jour les statistiques
   const total = players.length;
   const alive = players.filter(p => p.status === 'alive').length;
@@ -1220,11 +1240,19 @@ async function showGMPanel() {
 
   // Chargements initiaux
   await syncGMData();
-  const { data } = await supabase.from('game_state').select('*').eq('id', 1).single();
-  if (data) {
-    gameState = data;
-    renderGMPanel();
-  }
+  supabase.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
+    if (data) {
+      gameState = data;
+      renderGMPanel();
+    } else {
+      console.log("Game state non trouvé (GM), initialisation par défaut...");
+      const { data: newGS } = await supabase.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
+      if (newGS) {
+        gameState = newGS;
+        renderGMPanel();
+      }
+    }
+  });
 
   setupGMEventListeners();
 }
@@ -1238,6 +1266,11 @@ async function syncGMData() {
 }
 
 function renderGMPanel() {
+  if (!gameState || !gameState.phase) {
+    console.log("Game state not yet loaded, skipping renderGMPanel.");
+    return;
+  }
+
   const total = players.length;
   const alive = players.filter(p => p.status === 'alive').length;
   const wolves = players.filter(p => p.status === 'alive' && p.role === 'loup').length;
