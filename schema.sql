@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS players (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Désactiver RLS (Row Level Security) pour permettre l'accès anonyme (nécessaire pour le jeu temps réel)
+ALTER TABLE game_state DISABLE ROW LEVEL SECURITY;
+ALTER TABLE players DISABLE ROW LEVEL SECURITY;
+
 -- 4. Fonction PL/pgSQL sécurisée pour rejoindre le lobby
 -- Assure l'attribution d'un numéro incrémental unique de 1 à N de manière transactionnelle
 CREATE OR REPLACE FUNCTION join_lobby(player_name TEXT)

@@ -2,7 +2,7 @@
 
 let supabaseUrl = CONFIG.SUPABASE_URL;
 let supabaseAnonKey = CONFIG.SUPABASE_ANON_KEY;
-let supabase = null;
+let supabaseClient = null;
 
 // Données locales synchronisées
 let players = [];
@@ -66,7 +66,7 @@ function initConfiguration() {
 // Lancement de l'application
 async function startApp() {
   try {
-    supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+    supabaseClient = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
   } catch (err) {
     console.error("Erreur d'initialisation Supabase:", err);
     alert("Impossible de se connecter à Supabase. Vérifiez vos identifiants.");
@@ -93,7 +93,7 @@ function startPresenceHeartbeat() {
   if (!myPlayer) return;
   // Mettre à jour le timestamp toutes les 15 secondes
   setInterval(async () => {
-    await supabase
+    await supabaseClient
       .from('players')
       .update({ last_seen: new Date().toISOString(), is_online: true })
       .eq('id', myPlayer.id);
@@ -188,7 +188,7 @@ async function initPlayer() {
 
   if (cachedPlayerId) {
     // Vérifier si le joueur existe toujours en base de données
-    const { data: player, error } = await supabase
+    const { data: player, error } = await supabaseClient
       .from('players')
       .select('*')
       .eq('id', cachedPlayerId)
@@ -222,7 +222,7 @@ async function initPlayer() {
     document.getElementById('btn-player-join').disabled = true;
 
     // Appeler la fonction SQL de join_lobby sécurisée pour les accès concurrents
-    const { data, error } = await supabase.rpc('join_lobby', { player_name: nameInput });
+    const { data, error } = await supabaseClient.rpc('join_lobby', { player_name: nameInput });
 
     if (error) {
       console.error(error);
@@ -264,7 +264,7 @@ function setupPlayerSubscriptions() {
   document.getElementById('player-lobby-number').textContent = myPlayer.number;
 
   // 1. Écouter l'état du jeu
-  supabase
+  supabaseClient
     .channel('public_game_state')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state', filter: 'id=eq.1' }, payload => {
       gameState = payload.new;
@@ -273,13 +273,13 @@ function setupPlayerSubscriptions() {
     .subscribe();
 
   // Charger l'état actuel immédiatement (auto-création si absent pour résilience)
-  supabase.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
+  supabaseClient.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
     if (data) {
       gameState = data;
       handleGameStateUpdate();
     } else {
       console.log("Game state non trouvé, initialisation par défaut...");
-      const { data: newGS } = await supabase.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
+      const { data: newGS } = await supabaseClient.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
       if (newGS) {
         gameState = newGS;
         handleGameStateUpdate();
@@ -288,7 +288,7 @@ function setupPlayerSubscriptions() {
   });
 
   // 2. Écouter sa propre fiche joueur (pour savoir si on meurt ou change de rôle)
-  supabase
+  supabaseClient
     .channel(`player_self_${myPlayer.id}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `id=eq.${myPlayer.id}` }, payload => {
       myPlayer = payload.new;
@@ -297,7 +297,7 @@ function setupPlayerSubscriptions() {
     .subscribe();
 
   // Charger sa propre fiche joueur immédiatement
-  supabase.from('players').select('*').eq('id', myPlayer.id).single().then(({ data }) => {
+  supabaseClient.from('players').select('*').eq('id', myPlayer.id).single().then(({ data }) => {
     if (data) {
       myPlayer = data;
       handleMyPlayerUpdate();
@@ -441,7 +441,7 @@ function setupNightSleepPanel() {
     if (isMeLover) {
       const otherId = loverIds.find(id => id !== myPlayer.id);
       // Récupérer le nom de l'autre amoureux
-      supabase.from('players').select('name, number').eq('id', otherId).single().then(({ data }) => {
+      supabaseClient.from('players').select('name, number').eq('id', otherId).single().then(({ data }) => {
         if (data) {
           document.getElementById('player-lover-name').textContent = data.name;
           document.getElementById('player-lover-num').textContent = data.number;
@@ -478,7 +478,7 @@ async function setupNightActionPanel() {
   const instructions = document.getElementById('player-action-instructions');
   
   // Charger la liste des joueurs vivants
-  const { data: alivePlayers } = await supabase
+  const { data: alivePlayers } = await supabaseClient
     .from('players')
     .select('id, name, number, role, charmed')
     .eq('status', 'alive')
@@ -539,7 +539,7 @@ async function setupNightActionPanel() {
         const targetNum = targetId ? alivePlayers.find(p => p.id === targetId)?.number : null;
         
         // Mettre à jour mon vote individuel de loup en BDD
-        await supabase.from('players').update({ vote_target: targetNum }).eq('id', myPlayer.id);
+        await supabaseClient.from('players').update({ vote_target: targetNum }).eq('id', myPlayer.id);
       });
       break;
 
@@ -616,7 +616,7 @@ function renderSelectableList(containerId, list, maxSelect, preselectedArray, on
 document.getElementById('btn-submit-cupidon').addEventListener('click', async () => {
   if (selectedLoverTargets.length === 2) {
     document.getElementById('btn-submit-cupidon').disabled = true;
-    const { error } = await supabase
+    const { error } = await supabaseClient
       .from('game_state')
       .update({ lovers: selectedLoverTargets })
       .eq('id', 1);
@@ -631,11 +631,11 @@ document.getElementById('btn-submit-cupidon').addEventListener('click', async ()
 document.getElementById('btn-submit-garde').addEventListener('click', async () => {
   if (selectedGardeTarget) {
     document.getElementById('btn-submit-garde').disabled = true;
-    const { data: targetPlayer } = await supabase.from('players').select('number').eq('id', selectedGardeTarget).single();
+    const { data: targetPlayer } = await supabaseClient.from('players').select('number').eq('id', selectedGardeTarget).single();
     if (targetPlayer) {
       // Sauvegarder dans la liste des protégés du tour
       const saves = [targetPlayer.number];
-      const { error } = await supabase
+      const { error } = await supabaseClient
         .from('game_state')
         .update({ current_night_saves: saves })
         .eq('id', 1);
@@ -653,7 +653,7 @@ document.getElementById('btn-submit-voyante').addEventListener('click', async ()
     document.getElementById('btn-submit-voyante').disabled = true;
     
     // Obtenir le rôle du joueur ciblé
-    const { data: targetPlayer } = await supabase
+    const { data: targetPlayer } = await supabaseClient
       .from('players')
       .select('name, role')
       .eq('id', selectedVoyanteTarget)
@@ -668,7 +668,7 @@ document.getElementById('btn-submit-voyante').addEventListener('click', async ()
       revealDiv.classList.remove('hidden');
 
       // Marquer comme fait en mettant à jour vote_target chez la Voyante
-      await supabase.from('players').update({ vote_target: 999 }).eq('id', myPlayer.id);
+      await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', myPlayer.id);
     }
   }
 });
@@ -678,14 +678,14 @@ document.getElementById('btn-submit-fluteur').addEventListener('click', async ()
     document.getElementById('btn-submit-fluteur').disabled = true;
 
     // Mettre à jour les deux joueurs comme charmés dans la BDD
-    const { error } = await supabase
+    const { error } = await supabaseClient
       .from('players')
       .update({ charmed: true })
       .in('id', selectedFluteurTargets);
 
     if (!error) {
       // Mettre à jour vote_target chez le Flûteur pour indiquer qu'il a joué
-      await supabase.from('players').update({ vote_target: 999 }).eq('id', myPlayer.id);
+      await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', myPlayer.id);
       document.getElementById('action-fluteur-panel').classList.add('hidden');
       document.getElementById('action-completed-msg').classList.remove('hidden');
     }
@@ -733,7 +733,7 @@ function setupSorciereInterface(alivePlayers) {
   btnHeal.onclick = async () => {
     btnHeal.disabled = true;
     // Supprimer la victime de la liste des morts de la nuit
-    await supabase.from('game_state').update({
+    await supabaseClient.from('game_state').update({
       current_night_kills: [],
       witch_heal_used: true
     }).eq('id', 1);
@@ -749,7 +749,7 @@ function setupSorciereInterface(alivePlayers) {
       if (target) {
         // Ajouter à la liste des empoisonnés
         const poisons = [target.number];
-        await supabase.from('game_state').update({
+        await supabaseClient.from('game_state').update({
           current_night_poisons: poisons,
           witch_poison_used: true
         }).eq('id', 1);
@@ -762,7 +762,7 @@ function setupSorciereInterface(alivePlayers) {
   // Action globale Sorcière : Passer/Valider
   document.getElementById('btn-submit-sorciere').onclick = async () => {
     // Mettre à jour vote_target pour indiquer à la BDD qu'elle a passé son tour
-    await supabase.from('players').update({ vote_target: 999 }).eq('id', myPlayer.id);
+    await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', myPlayer.id);
     document.getElementById('action-sorciere-panel').classList.add('hidden');
     document.getElementById('action-completed-msg').classList.remove('hidden');
   };
@@ -773,7 +773,7 @@ function subscribeToWolfChat() {
   if (wolfChannel) return;
 
   // Créer ou rejoindre le canal en mode Broadcast
-  wolfChannel = supabase.channel('wolf_chat');
+  wolfChannel = supabaseClient.channel('wolf_chat');
   
   wolfChannel
     .on('broadcast', { event: 'msg' }, (payload) => {
@@ -811,7 +811,7 @@ function subscribeToWolfChat() {
 
 function unsubscribeFromWolfChat() {
   if (wolfChannel) {
-    supabase.removeChannel(wolfChannel);
+    supabaseClient.removeChannel(wolfChannel);
     wolfChannel = null;
   }
 }
@@ -838,7 +838,7 @@ async function setupDayVotePanel() {
   confirmBox.classList.add('hidden');
 
   // Obtenir la liste de tous les joueurs vivants
-  const { data: alivePlayers } = await supabase
+  const { data: alivePlayers } = await supabaseClient
     .from('players')
     .select('id, name, number')
     .eq('status', 'alive')
@@ -853,7 +853,7 @@ async function setupDayVotePanel() {
     
     // Mettre à jour mon vote en BDD
     const targetNum = target ? target.number : null;
-    await supabase.from('players').update({ vote_target: targetNum }).eq('id', myPlayer.id);
+    await supabaseClient.from('players').update({ vote_target: targetNum }).eq('id', myPlayer.id);
 
     // Mettre à jour l'affichage
     if (target) {
@@ -897,7 +897,7 @@ async function showChasseurDeathPanel() {
   deadRoleName.innerHTML = "Chasseur ☠️<br><br><span style='color: var(--neon-red); font-size:1.1rem;'>UTILISEZ VOTRE DERNIER SOUFFLE !</span>";
 
   // Créer un panneau de tir interactif
-  const { data: alivePlayers } = await supabase
+  const { data: alivePlayers } = await supabaseClient
     .from('players')
     .select('id, name, number')
     .eq('status', 'alive')
@@ -926,9 +926,9 @@ async function showChasseurDeathPanel() {
       const target = alivePlayers.find(p => p.id === targetId);
       if (target) {
         // Éliminer directement la cible
-        await supabase.from('players').update({ status: 'dead' }).eq('id', target.id);
+        await supabaseClient.from('players').update({ status: 'dead' }).eq('id', target.id);
         // Sauvegarder mon vote_target pour bloquer d'autres tirs
-        await supabase.from('players').update({ vote_target: target.number }).eq('id', myPlayer.id);
+        await supabaseClient.from('players').update({ vote_target: target.number }).eq('id', myPlayer.id);
         targetBox.remove();
         alert(`Vous avez abattu ${target.name} !`);
       }
@@ -944,14 +944,14 @@ async function initTableau() {
   document.getElementById('tableau-view').classList.remove('hidden');
 
   // Inscription aux modifications
-  supabase
+  supabaseClient
     .channel('tableau_players')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => {
       syncTableauData();
     })
     .subscribe();
 
-  supabase
+  supabaseClient
     .channel('tableau_state')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state', filter: 'id=eq.1' }, payload => {
       gameState = payload.new;
@@ -961,13 +961,13 @@ async function initTableau() {
 
   // Chargement initial
   await syncTableauData();
-  supabase.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
+  supabaseClient.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
     if (data) {
       gameState = data;
       renderTableau();
     } else {
       console.log("Game state non trouvé (Tableau), initialisation par défaut...");
-      const { data: newGS } = await supabase.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
+      const { data: newGS } = await supabaseClient.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
       if (newGS) {
         gameState = newGS;
         renderTableau();
@@ -977,7 +977,7 @@ async function initTableau() {
 }
 
 async function syncTableauData() {
-  const { data } = await supabase.from('players').select('*').order('number');
+  const { data } = await supabaseClient.from('players').select('*').order('number');
   if (data) {
     players = data;
     renderTableau();
@@ -1192,7 +1192,7 @@ async function initGM() {
   document.getElementById('gm-view').classList.remove('hidden');
 
   // Vérifier si déjà authentifié
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await supabaseClient.auth.getSession();
   if (session) {
     showGMPanel();
   } else {
@@ -1203,7 +1203,7 @@ async function initGM() {
 
       document.getElementById('btn-gm-login').disabled = true;
 
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
         email: 'admin@admin.fr',
         password: password
       });
@@ -1223,14 +1223,14 @@ async function showGMPanel() {
   document.getElementById('gm-main-panel').classList.remove('hidden');
 
   // S'abonner aux changements des tables
-  supabase
+  supabaseClient
     .channel('gm_players')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, () => {
       syncGMData();
     })
     .subscribe();
 
-  supabase
+  supabaseClient
     .channel('gm_state')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'game_state', filter: 'id=eq.1' }, payload => {
       gameState = payload.new;
@@ -1240,13 +1240,13 @@ async function showGMPanel() {
 
   // Chargements initiaux
   await syncGMData();
-  supabase.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
+  supabaseClient.from('game_state').select('*').eq('id', 1).single().then(async ({ data }) => {
     if (data) {
       gameState = data;
       renderGMPanel();
     } else {
       console.log("Game state non trouvé (GM), initialisation par défaut...");
-      const { data: newGS } = await supabase.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
+      const { data: newGS } = await supabaseClient.from('game_state').insert([{ id: 1, phase: 'lobby' }]).select().single();
       if (newGS) {
         gameState = newGS;
         renderGMPanel();
@@ -1258,7 +1258,7 @@ async function showGMPanel() {
 }
 
 async function syncGMData() {
-  const { data } = await supabase.from('players').select('*').order('number');
+  const { data } = await supabaseClient.from('players').select('*').order('number');
   if (data) {
     players = data;
     renderGMPanel();
@@ -1528,7 +1528,7 @@ function setupGMEventListeners() {
 
     // Mettre à jour chaque joueur avec son rôle
     const updates = players.map((p, idx) => {
-      return supabase
+      return supabaseClient
         .from('players')
         .update({
           role: roles[idx],
@@ -1542,7 +1542,7 @@ function setupGMEventListeners() {
     await Promise.all(updates);
 
     // Initialiser l'état du jeu à distribution
-    await supabase.from('game_state').update({
+    await supabaseClient.from('game_state').update({
       phase: 'distributing',
       lovers: [],
       current_night_kills: [],
@@ -1587,16 +1587,16 @@ function setupGMEventListeners() {
     // sauf les loups car on a calculé leur cible, ou la sorcière. En gros on clean pour le matin.
     if (nextRole === 'none') {
       // Fin de la nuit
-      await supabase.from('game_state').update({ night_phase: 'none' }).eq('id', 1);
+      await supabaseClient.from('game_state').update({ night_phase: 'none' }).eq('id', 1);
       alert("Fin des phases nocturnes. Vous pouvez réveiller le village.");
     } else {
       // Nettoyer les vote_target temporaires des joueurs
       const cleanUpdates = players.map(p => {
-        return supabase.from('players').update({ vote_target: null }).eq('id', p.id);
+        return supabaseClient.from('players').update({ vote_target: null }).eq('id', p.id);
       });
       await Promise.all(cleanUpdates);
 
-      await supabase.from('game_state').update({ night_phase: nextRole }).eq('id', 1);
+      await supabaseClient.from('game_state').update({ night_phase: nextRole }).eq('id', 1);
     }
   });
 
@@ -1661,7 +1661,7 @@ function setupGMEventListeners() {
         const p = players.find(x => x.number === num);
         if (p) {
           announcement += `☠️ <strong>${p.name}</strong> (N° ${p.number}), qui était <i>${ROLES_INFO[p.role]?.title || p.role}</i>.<br>`;
-          return supabase.from('players').update({ status: 'dead' }).eq('id', p.id);
+          return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
         }
         return Promise.resolve();
       });
@@ -1675,7 +1675,7 @@ function setupGMEventListeners() {
     }
 
     // Passer en phase day_announcement
-    await supabase.from('game_state').update({
+    await supabaseClient.from('game_state').update({
       phase: 'day_announcement',
       announcement_text: announcement
     }).eq('id', 1);
@@ -1686,7 +1686,7 @@ function setupGMEventListeners() {
   // Lancer le débat public
   document.getElementById('btn-gm-start-discussion').addEventListener('click', async () => {
     // Initialiser un débat de 3 minutes (180s)
-    await supabase.from('game_state').update({
+    await supabaseClient.from('game_state').update({
       phase: 'day_discussion',
       timer_duration: 180,
       timer_started_at: new Date().toISOString()
@@ -1703,11 +1703,11 @@ function setupGMEventListeners() {
   document.getElementById('btn-gm-start-vote').addEventListener('click', async () => {
     // Vider les anciens votes
     const cleanVotes = players.map(p => {
-      return supabase.from('players').update({ vote_target: null }).eq('id', p.id);
+      return supabaseClient.from('players').update({ vote_target: null }).eq('id', p.id);
     });
     await Promise.all(cleanVotes);
 
-    await supabase.from('game_state').update({
+    await supabaseClient.from('game_state').update({
       phase: 'day_vote'
     }).eq('id', 1);
   });
@@ -1734,7 +1734,7 @@ function setupGMEventListeners() {
       alert(`${targetPlayer.name} était l'Idiot du Village ! Il survit mais ne pourra plus voter.`);
       // On le garde en vie mais on peut marquer vote_target à 999 ou similaire pour lui enlever le vote
       // Pour faire simple, on affiche juste qu'il survit.
-      await supabase.from('game_state').update({
+      await supabaseClient.from('game_state').update({
         phase: 'day_announcement',
         announcement_text: `📣 ${targetPlayer.name} (N° ${targetPlayer.number}) a été désigné par le village, mais c'est l'Idiot du Village ! Il est gracié mais perd son vote.`
       }).eq('id', 1);
@@ -1747,24 +1747,24 @@ function setupGMEventListeners() {
     // (On peut vérifier si lovers est vide pour deviner si c'est le jour 1, ou simplement valider).
 
     // Éliminer le joueur
-    await supabase.from('players').update({ status: 'dead' }).eq('id', targetPlayer.id);
+    await supabaseClient.from('players').update({ status: 'dead' }).eq('id', targetPlayer.id);
 
     // Vérifier les amoureux
     if (gameState.lovers && gameState.lovers.includes(targetPlayer.id)) {
       const otherId = gameState.lovers.find(id => id !== targetPlayer.id);
       const other = players.find(p => p.id === otherId);
       if (other && other.status === 'alive') {
-        await supabase.from('players').update({ status: 'dead' }).eq('id', other.id);
+        await supabaseClient.from('players').update({ status: 'dead' }).eq('id', other.id);
         alert(`💔 ${other.name} (N° ${other.number}) s'est donné la mort par chagrin d'amour !`);
       }
     }
 
     // Refaire une synchronisation et vérifier la fin de partie
-    const { data: updatedPlayers } = await supabase.from('players').select('*');
+    const { data: updatedPlayers } = await supabaseClient.from('players').select('*');
     const winners = checkGameOverConditions(updatedPlayers);
 
     if (winners) {
-      await supabase.from('game_state').update({
+      await supabaseClient.from('game_state').update({
         phase: 'game_over',
         winners: winners
       }).eq('id', 1);
@@ -1779,14 +1779,14 @@ function setupGMEventListeners() {
   // Recommencer une partie depuis l'écran de fin
   document.getElementById('btn-gm-restart-lobby').addEventListener('click', async () => {
     if (confirm("Voulez-vous réinitialiser et relancer un lobby ?")) {
-      await supabase.rpc('reset_game');
+      await supabaseClient.rpc('reset_game');
     }
   });
 
   // Bouton de réinitialisation complète de la partie
   document.getElementById('btn-gm-reset').addEventListener('click', async () => {
     if (confirm("ATTENTION : Cela supprimera tous les joueurs et réinitialisera le jeu. Continuer ?")) {
-      await supabase.rpc('reset_game');
+      await supabaseClient.rpc('reset_game');
     }
   });
 }
@@ -1809,12 +1809,12 @@ async function advanceToNight() {
 
   // Nettoyer les vote_target et états temporaires
   const cleanUpdates = players.map(p => {
-    return supabase.from('players').update({ vote_target: null }).eq('id', p.id);
+    return supabaseClient.from('players').update({ vote_target: null }).eq('id', p.id);
   });
   await Promise.all(cleanUpdates);
 
   // Mettre à jour l'état général
-  await supabase.from('game_state').update({
+  await supabaseClient.from('game_state').update({
     phase: 'night',
     night_phase: startRole,
     current_night_kills: [],
@@ -1825,7 +1825,7 @@ async function advanceToNight() {
 
 // Calculer le vote de nuit des Loups
 async function calculateLoupNightKill() {
-  const { data: wolvesPlayers } = await supabase
+  const { data: wolvesPlayers } = await supabaseClient
     .from('players')
     .select('vote_target')
     .eq('role', 'loup')
@@ -1842,7 +1842,7 @@ async function calculateLoupNightKill() {
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     if (sorted.length > 0) {
       const topTargetNum = parseInt(sorted[0][0]);
-      await supabase.from('game_state').update({
+      await supabaseClient.from('game_state').update({
         current_night_kills: [topTargetNum]
       }).eq('id', 1);
     }
@@ -1851,7 +1851,7 @@ async function calculateLoupNightKill() {
 
 // Mettre à jour le minuteur GM
 async function updateGMTimer(seconds) {
-  await supabase.from('game_state').update({
+  await supabaseClient.from('game_state').update({
     timer_duration: seconds,
     timer_started_at: new Date().toISOString()
   }).eq('id', 1);
