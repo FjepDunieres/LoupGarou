@@ -8,19 +8,25 @@ let supabaseClient = null;
 let players = [];
 let gameState = {};
 let myPlayer = null;
-let selectedVoteTarget = null;
+let selectedVoteTargets = []; // Votes de jour (jusqu'à 3)
 let selectedLoverTargets = []; // Cupidon
 let selectedFluteurTargets = []; // Flûteur
 let selectedGardeTarget = null; // Garde
 let selectedVoyanteTarget = null; // Voyante
 let selectedPoisonTarget = null; // Sorcière
+let selectedMayorTarget = null; // Élection du Maire
+let selectedMayorTiebreakTargets = []; // Pour trancher en tant que Maire
 let isCardFlipped = false;
 let lastTableauPhase = null;
 
 // Configuration de la partie
 let configWolvesCount = 2;
 let configNightTimerVal = 20; // 20s par défaut
+let configDayTimerVal = 180; // 3m par défaut
+let configVoteTimerVal = 45; // 45s par défaut
+let configMayorTimerVal = 45; // 45s par défaut
 let nightTurnTimeout = null; // Pour le countdown nocturne automatique
+let globalAutoPilotInterval = null; // Interval d'orchestration automatique
 let spectatorChannel = null;
 
 // Variables pour le minuteur
@@ -303,6 +309,11 @@ function setupPlayerSubscriptions() {
   supabaseClient
     .channel(`player_self_${myPlayer.id}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `id=eq.${myPlayer.id}` }, payload => {
+      if (payload.eventType === 'DELETE' || !payload.new) {
+        localStorage.removeItem('player_uuid');
+        location.reload();
+        return;
+      }
       myPlayer = payload.new;
       handleMyPlayerUpdate();
     })
@@ -313,6 +324,9 @@ function setupPlayerSubscriptions() {
     if (data) {
       myPlayer = data;
       handleMyPlayerUpdate();
+    } else {
+      localStorage.removeItem('player_uuid');
+      location.reload();
     }
   });
 }
@@ -365,9 +379,12 @@ function handleGameStateUpdate() {
   const phases = [
     'player-phase-distribute', 'player-phase-night-sleep', 'player-phase-night-action',
     'player-phase-day-announcement', 'player-phase-day-discussion', 'player-phase-day-vote',
-    'player-phase-game-over'
+    'player-phase-game-over', 'player-phase-day-mayor', 'player-phase-mayor-tiebreak'
   ];
-  phases.forEach(id => document.getElementById(id).classList.add('hidden'));
+  phases.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  });
 
   if (myPlayer && myPlayer.status === 'dead') {
     renderSpectatorMode();
@@ -380,6 +397,27 @@ function handleGameStateUpdate() {
       case 'distributing':
         activePhaseId = 'player-phase-distribute';
         setupRoleCardReveal();
+        break;
+
+      case 'day_mayor_election':
+        activePhaseId = 'player-phase-day-mayor';
+        setupMayorElectionPanel();
+        break;
+
+      case 'day_vote_tiebreak':
+        if (myPlayer.is_mayor) {
+          activePhaseId = 'player-phase-mayor-tiebreak';
+          setupMayorTiebreakPanel();
+        } else {
+          activePhaseId = 'player-phase-day-discussion';
+          const timerEl = document.getElementById('player-discussion-timer');
+          if (timerEl) {
+            timerEl.textContent = "⚖️ Égalité";
+            timerEl.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+          }
+          const instructionEl = document.querySelector('#player-phase-day-discussion p:last-of-type');
+          if (instructionEl) instructionEl.textContent = "Le Maire est en train de trancher le vote...";
+        }
         break;
 
       case 'night':
@@ -402,6 +440,9 @@ function handleGameStateUpdate() {
 
       case 'day_discussion':
         activePhaseId = 'player-phase-day-discussion';
+        // Remettre le texte d'instruction d'origine pour la discussion
+        const instEl = document.querySelector('#player-phase-day-discussion p:last-of-type');
+        if (instEl) instEl.textContent = "Le vote d'élimination débutera dès que le minuteur expirera.";
         startDiscussionTimer(gameState.timer_duration, gameState.timer_started_at);
         break;
 
@@ -587,16 +628,23 @@ async function setupNightActionPanel() {
       break;
 
     case 'loup':
-      instructions.textContent = "Discutez en direct avec la meute et désignez la victime de cette nuit.";
+      instructions.textContent = "Discutez en direct avec la meute et désignez de 0 à 3 suspect(s) à dévorer.";
       document.getElementById('action-loups-panel').classList.remove('hidden');
       
-      // Liste de vote spécifique pour les loups
-      renderSelectableList('loups-search-list', otherAlivePlayers, 1, myPlayer.vote_target ? [alivePlayers.find(p => p.number === myPlayer.vote_target)?.id] : [], async (selected) => {
-        const targetId = selected[0] || null;
-        const targetNum = targetId ? alivePlayers.find(p => p.id === targetId)?.number : null;
-        
-        // Mettre à jour mon vote individuel de loup en BDD
-        await supabaseClient.from('players').update({ vote_target: targetNum }).eq('id', myPlayer.id);
+      const preselectedLoupIds = [];
+      if (myPlayer.vote_target) {
+        const nums = myPlayer.vote_target.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+        nums.forEach(num => {
+          const p = alivePlayers.find(x => x.number === num);
+          if (p) preselectedLoupIds.push(p.id);
+        });
+      }
+      
+      // Liste de vote spécifique pour les loups (jusqu'à 3)
+      renderSelectableList('loups-search-list', otherAlivePlayers, 3, preselectedLoupIds, async (selected) => {
+        const selectedNums = selected.map(id => alivePlayers.find(p => p.id === id)?.number).filter(n => n !== undefined);
+        const voteStr = selectedNums.join(',');
+        await supabaseClient.from('players').update({ vote_target: voteStr }).eq('id', myPlayer.id);
       });
       break;
 
@@ -910,15 +958,64 @@ async function setupDayVotePanel() {
   // Exclure soi-même
   const otherAlive = alivePlayers.filter(p => p.id !== myPlayer.id);
 
-  renderSelectableList('day-vote-search-list', otherAlive, 1, myPlayer.vote_target ? [alivePlayers.find(p => p.number === myPlayer.vote_target)?.id] : [], async (selected) => {
+  // Parser les votes existants
+  const preselectedIds = [];
+  if (myPlayer.vote_target) {
+    const preselectedNums = myPlayer.vote_target.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+    preselectedNums.forEach(num => {
+      const p = alivePlayers.find(x => x.number === num);
+      if (p) preselectedIds.push(p.id);
+    });
+  }
+
+  // Voter pour maximum 3 suspects
+  renderSelectableList('day-vote-search-list', otherAlive, 3, preselectedIds, async (selected) => {
+    const selectedPlayers = selected.map(id => alivePlayers.find(p => p.id === id)).filter(p => p);
+    const selectedNums = selectedPlayers.map(p => p.number);
+    const voteStr = selectedNums.join(',');
+    
+    await supabaseClient.from('players').update({ vote_target: voteStr }).eq('id', myPlayer.id);
+
+    // Mettre à jour l'affichage
+    if (selectedPlayers.length > 0) {
+      targetNameSpan.textContent = selectedPlayers.map(p => `${p.name} (N° ${p.number})`).join(', ');
+      confirmBox.classList.remove('hidden');
+    } else {
+      targetNameSpan.textContent = "Personne";
+      confirmBox.classList.add('hidden');
+    }
+  });
+}
+
+// --- ÉLECTION DU MAIRE ---
+async function setupMayorElectionPanel() {
+  const targetNameSpan = document.getElementById('player-mayor-target-name');
+  const confirmBox = document.getElementById('player-mayor-confirm-box');
+  
+  targetNameSpan.textContent = "Personne";
+  confirmBox.classList.add('hidden');
+
+  const { data: alivePlayers } = await supabaseClient
+    .from('players')
+    .select('id, name, number')
+    .eq('status', 'alive')
+    .order('number');
+
+  const preselected = [];
+  if (myPlayer.vote_target) {
+    const num = parseInt(myPlayer.vote_target);
+    const found = alivePlayers.find(p => p.number === num);
+    if (found) preselected.push(found.id);
+  }
+
+  // En élection de maire, on vote pour 1 personne (y compris soi-même)
+  renderSelectableList('day-mayor-search-list', alivePlayers, 1, preselected, async (selected) => {
     const targetId = selected[0] || null;
     const target = alivePlayers.find(p => p.id === targetId);
     
-    // Mettre à jour mon vote en BDD
-    const targetNum = target ? target.number : null;
+    const targetNum = target ? target.number.toString() : null;
     await supabaseClient.from('players').update({ vote_target: targetNum }).eq('id', myPlayer.id);
 
-    // Mettre à jour l'affichage
     if (target) {
       targetNameSpan.textContent = `${target.name} (N° ${target.number})`;
       confirmBox.classList.remove('hidden');
@@ -926,6 +1023,51 @@ async function setupDayVotePanel() {
       confirmBox.classList.add('hidden');
     }
   });
+}
+
+// --- TRANCHAGE DU VOTE PAR LE MAIRE ---
+async function setupMayorTiebreakPanel() {
+  const submitBtn = document.getElementById('btn-submit-mayor-tiebreak');
+  submitBtn.disabled = true;
+
+  const parts = (gameState.announcement_text || "").split(':');
+  const spotsLeft = parseInt(parts[0]) || 1;
+  const tiedNums = parts[1] ? parts[1].split(',').map(n => parseInt(n)) : [];
+
+  const { data: alivePlayers } = await supabaseClient
+    .from('players')
+    .select('id, name, number')
+    .eq('status', 'alive')
+    .in('number', tiedNums)
+    .order('number');
+
+  const instructions = document.getElementById('mayor-tiebreak-instructions');
+  if (instructions) {
+    instructions.innerHTML = `Vous devez désigner exactement <strong>${spotsLeft}</strong> joueur(s) à éliminer parmi les égalités ci-dessous :`;
+  }
+
+  selectedMayorTiebreakTargets = [];
+
+  renderSelectableList('mayor-tiebreak-search-list', alivePlayers, spotsLeft, [], (selected) => {
+    selectedMayorTiebreakTargets = selected;
+    submitBtn.disabled = (selected.length !== spotsLeft);
+  });
+
+  submitBtn.onclick = async () => {
+    submitBtn.disabled = true;
+    const chosenPlayers = selectedMayorTiebreakTargets.map(id => alivePlayers.find(p => p.id === id)).filter(p => p);
+    
+    // Éliminer les joueurs choisis
+    const updates = chosenPlayers.map(p => {
+      return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
+    });
+    await Promise.all(updates);
+
+    // Signaler au GM que la décision a été prise
+    await supabaseClient.from('game_state').update({
+      announcement_text: 'resolved'
+    }).eq('id', 1);
+  };
 }
 
 // --- MINUTEUR DISCUSSION ---
@@ -1049,8 +1191,8 @@ async function renderSpectatorMode() {
   const aliveCount = players.filter(p => p.status === 'alive').length;
   specAlive.textContent = `${aliveCount} / ${players.length}`;
 
-  // 2. Minuteur débat
-  if (gameState.phase === 'day_discussion' && gameState.timer_started_at) {
+  // 2. Minuteur débat / élection / tiebreak
+  if (['day_discussion', 'day_mayor_election', 'day_vote_tiebreak'].includes(gameState.phase) && gameState.timer_started_at) {
     specTimerContainer.classList.remove('hidden');
     const start = new Date(gameState.timer_started_at).getTime();
     const elapsed = Math.floor((Date.now() - start) / 1000);
@@ -1073,7 +1215,10 @@ async function renderSpectatorMode() {
     const votesTally = {};
     players.forEach(p => {
       if (p.status === 'alive' && p.vote_target) {
-        votesTally[p.vote_target] = (votesTally[p.vote_target] || 0) + 1;
+        const targets = p.vote_target.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+        targets.forEach(t => {
+          votesTally[t] = (votesTally[t] || 0) + 1;
+        });
       }
     });
 
@@ -1116,8 +1261,9 @@ async function renderSpectatorMode() {
       roleText = `<span style="color:var(--neon-green); font-weight:bold; font-size:0.7rem;">🟢 En vie</span>`;
     }
 
+    const mayorIndicator = p.is_mayor ? '<span style="color:var(--neon-gold); margin-left:4px;">👑</span>' : '';
     item.innerHTML = `
-      <span>N° ${p.number} <strong>${p.name}</strong></span>
+      <span>N° ${p.number} <strong>${p.name}</strong>${mayorIndicator}</span>
       <span>${roleText}</span>
     `;
     specPlayersList.appendChild(item);
@@ -1279,6 +1425,60 @@ function renderTableau() {
       banner.innerHTML = "Regardez votre écran de téléphone en toute discrétion et découvrez votre carte de rôle.";
       break;
 
+    case 'day_mayor_election':
+      phaseSub.textContent = "👑 Élection du Maire";
+      timerBox.classList.remove('hidden');
+      banner.classList.add('hidden');
+      if (gameState.timer_started_at) {
+        const start = new Date(gameState.timer_started_at).getTime();
+        const updateTabTimer = () => {
+          const elapsed = Math.floor((Date.now() - start) / 1000);
+          const left = gameState.timer_duration - elapsed;
+
+          timerBox.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+          if (left > 60) timerBox.classList.add('timer-normal');
+          else if (left > 15) timerBox.classList.add('timer-warning');
+          else timerBox.classList.add('timer-critical');
+
+          if (left <= 0) {
+            timerBox.textContent = "00:00";
+            clearInterval(timerInterval);
+          } else {
+            timerBox.textContent = formatTime(left);
+          }
+        };
+        updateTabTimer();
+        timerInterval = setInterval(updateTabTimer, 1000);
+      }
+      break;
+
+    case 'day_vote_tiebreak':
+      phaseSub.textContent = "⚖️ Égalité - Arbitrage du Maire";
+      timerBox.classList.remove('hidden');
+      banner.classList.add('hidden');
+      if (gameState.timer_started_at) {
+        const start = new Date(gameState.timer_started_at).getTime();
+        const updateTabTimer = () => {
+          const elapsed = Math.floor((Date.now() - start) / 1000);
+          const left = gameState.timer_duration - elapsed;
+
+          timerBox.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+          if (left > 60) timerBox.classList.add('timer-normal');
+          else if (left > 15) timerBox.classList.add('timer-warning');
+          else timerBox.classList.add('timer-critical');
+
+          if (left <= 0) {
+            timerBox.textContent = "00:00";
+            clearInterval(timerInterval);
+          } else {
+            timerBox.textContent = formatTime(left);
+          }
+        };
+        updateTabTimer();
+        timerInterval = setInterval(updateTabTimer, 1000);
+      }
+      break;
+
     case 'night':
       phaseSub.textContent = "🌙 La nuit est tombée sur le village...";
       timerBox.classList.add('hidden');
@@ -1347,7 +1547,10 @@ function renderTableau() {
   if (gameState.phase === 'day_vote') {
     players.forEach(p => {
       if (p.status === 'alive' && p.vote_target) {
-        votesTally[p.vote_target] = (votesTally[p.vote_target] || 0) + 1;
+        const targets = p.vote_target.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+        targets.forEach(t => {
+          votesTally[t] = (votesTally[t] || 0) + 1;
+        });
       }
     });
   }
@@ -1366,6 +1569,9 @@ function renderTableau() {
 
     if (p) {
       card.classList.add(p.status === 'alive' ? 'alive' : 'dead');
+      if (p.is_mayor) {
+        card.classList.add('mayor');
+      }
       
       // Amoureux ?
       let loverIndicator = '';
@@ -1438,7 +1644,41 @@ async function initGM() {
   }
 }
 
+function loadGMConfigs() {
+  const wolves = localStorage.getItem('cfg_wolves');
+  if (wolves) {
+    configWolvesCount = parseInt(wolves);
+    const wolvesVal = document.getElementById('config-wolves-val');
+    if (wolvesVal) wolvesVal.textContent = configWolvesCount;
+  }
+  const night = localStorage.getItem('cfg_night_timer');
+  if (night) {
+    configNightTimerVal = parseInt(night);
+    const el = document.getElementById('config-night-timer');
+    if (el) el.value = configNightTimerVal;
+  }
+  const day = localStorage.getItem('cfg_day_timer');
+  if (day) {
+    configDayTimerVal = parseInt(day);
+    const el = document.getElementById('config-day-timer');
+    if (el) el.value = configDayTimerVal;
+  }
+  const vote = localStorage.getItem('cfg_vote_timer');
+  if (vote) {
+    configVoteTimerVal = parseInt(vote);
+    const el = document.getElementById('config-vote-timer');
+    if (el) el.value = configVoteTimerVal;
+  }
+  const mayor = localStorage.getItem('cfg_mayor_timer');
+  if (mayor) {
+    configMayorTimerVal = parseInt(mayor);
+    const el = document.getElementById('config-mayor-timer');
+    if (el) el.value = configMayorTimerVal;
+  }
+}
+
 async function showGMPanel() {
+  loadGMConfigs();
   document.getElementById('gm-login-panel').classList.add('hidden');
   document.getElementById('gm-main-panel').classList.remove('hidden');
 
@@ -1476,6 +1716,7 @@ async function showGMPanel() {
 
   setupGMEventListeners();
   setupSimulator();
+  runGlobalAutoPilot();
 }
 
 async function syncGMData() {
@@ -1601,8 +1842,30 @@ function renderGMPanel() {
     case 'distributing':
       activeSectionId = 'gm-section-lobby';
       document.getElementById('gm-current-phase-title').textContent = "Distribution des cartes...";
-      // Ajouter un bouton rapide pour passer à la nuit
       document.getElementById('btn-gm-start-game').textContent = "Distribution en cours... Lancer la Nuit ➔";
+      break;
+
+    case 'day_mayor_election':
+      activeSectionId = 'gm-section-day-discussion';
+      document.getElementById('gm-current-phase-title').textContent = "Élection du Maire";
+      if (gameState.timer_started_at) {
+        const start = new Date(gameState.timer_started_at).getTime();
+        const left = gameState.timer_duration - Math.floor((Date.now() - start) / 1000);
+        const timerEl = document.getElementById('gm-discussion-timer');
+        if (timerEl) {
+          timerEl.textContent = formatTime(left);
+          timerEl.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+          if (left > 60) timerEl.classList.add('timer-normal');
+          else if (left > 15) timerEl.classList.add('timer-warning');
+          else timerEl.classList.add('timer-critical');
+        }
+      }
+      break;
+
+    case 'day_vote_tiebreak':
+      activeSectionId = 'gm-section-day-vote';
+      document.getElementById('gm-current-phase-title').textContent = "Arbitrage du Maire (Égalité)";
+      renderGMVoteControls();
       break;
 
     case 'night':
@@ -1626,15 +1889,12 @@ function renderGMPanel() {
         const start = new Date(gameState.timer_started_at).getTime();
         const left = gameState.timer_duration - Math.floor((Date.now() - start) / 1000);
         const timerEl = document.getElementById('gm-discussion-timer');
-        timerEl.textContent = formatTime(left);
-
-        timerEl.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
-        if (left > 60) {
-          timerEl.classList.add('timer-normal');
-        } else if (left > 15) {
-          timerEl.classList.add('timer-warning');
-        } else {
-          timerEl.classList.add('timer-critical');
+        if (timerEl) {
+          timerEl.textContent = formatTime(left);
+          timerEl.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+          if (left > 60) timerEl.classList.add('timer-normal');
+          else if (left > 15) timerEl.classList.add('timer-warning');
+          else timerEl.classList.add('timer-critical');
         }
       }
       break;
@@ -1778,9 +2038,12 @@ function renderGMVoteControls() {
       opt.textContent = `N° ${p.number} - ${p.name}`;
       select.appendChild(opt);
 
-      // Compter les votes
+      // Compter les votes (qui peuvent être multiples séparés par des virgules)
       if (p.vote_target) {
-        votesCount[p.vote_target] = (votesCount[p.vote_target] || 0) + 1;
+        const targets = p.vote_target.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+        targets.forEach(t => {
+          votesCount[t] = (votesCount[t] || 0) + 1;
+        });
       }
     }
   });
@@ -1815,7 +2078,8 @@ async function softResetGame() {
         role: null,
         status: 'alive',
         charmed: false,
-        vote_target: null
+        vote_target: null,
+        is_mayor: false
       })
       .eq('id', p.id);
   });
@@ -1991,6 +2255,7 @@ function setupGMEventListeners() {
       if (configWolvesCount > 1) {
         configWolvesCount--;
         wolvesVal.textContent = configWolvesCount;
+        localStorage.setItem('cfg_wolves', configWolvesCount);
         syncGMData();
       }
     });
@@ -1998,6 +2263,7 @@ function setupGMEventListeners() {
       if (configWolvesCount < 10) {
         configWolvesCount++;
         wolvesVal.textContent = configWolvesCount;
+        localStorage.setItem('cfg_wolves', configWolvesCount);
         syncGMData();
       }
     });
@@ -2018,11 +2284,33 @@ function setupGMEventListeners() {
     }
   });
 
-  // Écouter le changement de minuteur de nuit
+  // Écouter le changement des minuteurs
   const nightTimerSelect = document.getElementById('config-night-timer');
   if (nightTimerSelect) {
     nightTimerSelect.addEventListener('change', () => {
       configNightTimerVal = parseInt(nightTimerSelect.value);
+      localStorage.setItem('cfg_night_timer', configNightTimerVal);
+    });
+  }
+  const dayTimerSelect = document.getElementById('config-day-timer');
+  if (dayTimerSelect) {
+    dayTimerSelect.addEventListener('change', () => {
+      configDayTimerVal = parseInt(dayTimerSelect.value);
+      localStorage.setItem('cfg_day_timer', configDayTimerVal);
+    });
+  }
+  const voteTimerSelect = document.getElementById('config-vote-timer');
+  if (voteTimerSelect) {
+    voteTimerSelect.addEventListener('change', () => {
+      configVoteTimerVal = parseInt(voteTimerSelect.value);
+      localStorage.setItem('cfg_vote_timer', configVoteTimerVal);
+    });
+  }
+  const mayorTimerSelect = document.getElementById('config-mayor-timer');
+  if (mayorTimerSelect) {
+    mayorTimerSelect.addEventListener('change', () => {
+      configMayorTimerVal = parseInt(mayorTimerSelect.value);
+      localStorage.setItem('cfg_mayor_timer', configMayorTimerVal);
     });
   }
 
@@ -2088,14 +2376,15 @@ function setupGMEventListeners() {
           role: customRoles[idx],
           status: 'alive',
           charmed: false,
-          vote_target: null
+          vote_target: null,
+          is_mayor: false
         })
         .eq('id', p.id);
     });
 
     await Promise.all(updates);
 
-    // Initialiser l'état du jeu à distribution
+    // Initialiser l'état du jeu à distribution avec minuteur de 10s
     await supabaseClient.from('game_state').update({
       phase: 'distributing',
       lovers: [],
@@ -2104,7 +2393,9 @@ function setupGMEventListeners() {
       current_night_poisons: [],
       witch_heal_used: false,
       witch_poison_used: false,
-      winners: ''
+      winners: '',
+      timer_duration: 10,
+      timer_started_at: new Date().toISOString()
     }).eq('id', 1);
 
     document.getElementById('btn-gm-start-game').disabled = false;
@@ -2298,10 +2589,59 @@ function setupGMEventListeners() {
     }
   });
 
+  // Fonction de réinitialisation robuste directe
+  async function executeResetGameDirect() {
+    let rpcSuccess = false;
+    try {
+      const { error } = await supabaseClient.rpc('reset_game');
+      if (!error) {
+        rpcSuccess = true;
+      } else {
+        console.warn("L'appel RPC reset_game a renvoyé une erreur:", error);
+      }
+    } catch (e) {
+      console.warn("L'appel RPC reset_game a échoué avec une exception:", e);
+    }
+
+    if (!rpcSuccess) {
+      console.log("Tentative de réinitialisation via requêtes directes...");
+      const { error: deleteError } = await supabaseClient.from('players').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (deleteError) {
+        console.error("Échec de la suppression directe des joueurs:", deleteError);
+        alert("Erreur lors de la suppression des joueurs : " + deleteError.message + "\nVeuillez vérifier que vous avez bien exécuté le script SQL dans Supabase (notamment la désactivation RLS).");
+        return;
+      }
+      
+      const { error: updateError } = await supabaseClient.from('game_state').update({
+        phase: 'lobby',
+        night_phase: 'none',
+        timer_duration: 0,
+        timer_started_at: null,
+        announcement_text: '',
+        lovers: [],
+        witch_heal_used: false,
+        witch_poison_used: false,
+        current_night_kills: [],
+        current_night_saves: [],
+        current_night_poisons: [],
+        winners: ''
+      }).eq('id', 1);
+      
+      if (updateError) {
+        console.error("Échec de la mise à jour directe de game_state:", updateError);
+        alert("Erreur lors de la mise à jour de l'état : " + updateError.message);
+        return;
+      }
+    }
+    
+    // Succès ! Recharger localement la page du GM pour nettoyer les states locaux
+    location.reload();
+  }
+
   // Vider le salon depuis l'écran de fin (Supprimer les joueurs)
   document.getElementById('btn-gm-clear-players').addEventListener('click', async () => {
     if (confirm("Voulez-vous réinitialiser complètement le jeu et supprimer tous les joueurs ?")) {
-      await supabaseClient.rpc('reset_game');
+      await executeResetGameDirect();
     }
   });
 
@@ -2315,9 +2655,23 @@ function setupGMEventListeners() {
   // Bouton de réinitialisation complète de la partie (Supprimer les joueurs)
   document.getElementById('btn-gm-reset').addEventListener('click', async () => {
     if (confirm("ATTENTION : Cela supprimera tous les joueurs et réinitialisera le jeu. Continuer ?")) {
-      await supabaseClient.rpc('reset_game');
+      await executeResetGameDirect();
     }
   });
+
+  // Bouton d'extension de temps (+30s)
+  const addTimeBtn = document.getElementById('btn-gm-add-time');
+  if (addTimeBtn) {
+    addTimeBtn.addEventListener('click', async () => {
+      if (gameState.timer_duration > 0 && gameState.timer_started_at) {
+        const newDuration = gameState.timer_duration + 30;
+        await supabaseClient.from('game_state').update({
+          timer_duration: newDuration
+        }).eq('id', 1);
+        if (navigator.vibrate) navigator.vibrate(30);
+      }
+    });
+  }
 }
 
 // ==========================================================================
@@ -2447,19 +2801,22 @@ async function simulateCurrentPhaseActions() {
   
   if (gameState.phase === 'night') {
     const role = gameState.night_phase;
-    const botWithRole = botPlayers.filter(p => p.role === role);
     
     if (role === 'loups') {
       const botWolves = botPlayers.filter(p => p.role === 'loup');
       if (botWolves.length > 0) {
         const targets = allAlive.filter(p => p.role !== 'loup');
         if (targets.length > 0) {
-          const target = targets[Math.floor(Math.random() * targets.length)];
           const updates = botWolves.map(wolf => {
-            return supabaseClient.from('players').update({ vote_target: target.number }).eq('id', wolf.id);
+            const numVotes = Math.floor(Math.random() * 4); // 0 to 3 votes
+            const shuffled = [...targets];
+            shuffleArray(shuffled);
+            const chosen = shuffled.slice(0, Math.min(numVotes, shuffled.length));
+            const voteStr = chosen.map(p => p.number).join(',');
+            return supabaseClient.from('players').update({ vote_target: voteStr }).eq('id', wolf.id);
           });
           await Promise.all(updates);
-          if (statusText) statusText.textContent = `Les loups bots ont voté pour N° ${target.number}.`;
+          if (statusText) statusText.textContent = "Les loups bots ont voté pour leurs cibles (0 à 3 votes par bot).";
         }
       }
     } else if (role === 'cupidon') {
@@ -2545,17 +2902,56 @@ async function simulateCurrentPhaseActions() {
         }
       }
     }
-  } else if (gameState.phase === 'day_vote') {
+  } else if (gameState.phase === 'day_mayor_election') {
     const votes = botPlayers.map(bot => {
-      const targets = allAlive.filter(p => p.id !== bot.id);
-      if (targets.length > 0) {
-        const target = targets[Math.floor(Math.random() * targets.length)];
-        return supabaseClient.from('players').update({ vote_target: target.number }).eq('id', bot.id);
+      if (allAlive.length > 0) {
+        const target = allAlive[Math.floor(Math.random() * allAlive.length)];
+        return supabaseClient.from('players').update({ vote_target: target.number.toString() }).eq('id', bot.id);
       }
       return Promise.resolve();
     });
     await Promise.all(votes);
-    if (statusText) statusText.textContent = "Tous les bots ont voté au hasard.";
+    if (statusText) statusText.textContent = "Tous les bots ont voté pour l'élection du Maire.";
+  } else if (gameState.phase === 'day_vote') {
+    const votes = botPlayers.map(bot => {
+      const targets = allAlive.filter(p => p.id !== bot.id);
+      if (targets.length > 0) {
+        const numVotes = Math.floor(Math.random() * 4); // 0 à 3 votes
+        const shuffled = [...targets];
+        shuffleArray(shuffled);
+        const chosen = shuffled.slice(0, Math.min(numVotes, shuffled.length));
+        const voteStr = chosen.map(p => p.number).join(',');
+        return supabaseClient.from('players').update({ vote_target: voteStr }).eq('id', bot.id);
+      }
+      return Promise.resolve();
+    });
+    await Promise.all(votes);
+    if (statusText) statusText.textContent = "Tous les bots ont voté au hasard (0 à 3 votes par bot).";
+  } else if (gameState.phase === 'day_vote_tiebreak') {
+    const mayor = allAlive.find(p => p.is_mayor && p.name.startsWith('[Bot]'));
+    if (mayor) {
+      const parts = (gameState.announcement_text || "").split(':');
+      const spotsLeft = parseInt(parts[0]) || 1;
+      const tiedNums = parts[1] ? parts[1].split(',').map(n => parseInt(n)) : [];
+      
+      const tiedPlayers = allAlive.filter(p => tiedNums.includes(p.number));
+      if (tiedPlayers.length > 0) {
+        const shuffled = [...tiedPlayers];
+        shuffleArray(shuffled);
+        const chosen = shuffled.slice(0, Math.min(spotsLeft, shuffled.length));
+        
+        const updates = chosen.map(p => {
+          return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
+        });
+        await Promise.all(updates);
+        
+        await supabaseClient.from('game_state').update({
+          announcement_text: 'resolved'
+        }).eq('id', 1);
+        
+        if (statusText) statusText.textContent = `Le Maire bot a tranché et éliminé : ${chosen.map(p => p.name).join(', ')}.`;
+      }
+    }
   }
 }
 
@@ -2599,17 +2995,22 @@ async function calculateLoupNightKill() {
     const counts = {};
     wolvesPlayers.forEach(w => {
       if (w.vote_target) {
-        counts[w.vote_target] = (counts[w.vote_target] || 0) + 1;
+        const targets = w.vote_target.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+        targets.forEach(t => {
+          counts[t] = (counts[t] || 0) + 1;
+        });
       }
     });
 
+    const aliveCount = players.filter(p => p.status === 'alive').length;
+    const limit = Math.ceil(aliveCount / 10);
+
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    if (sorted.length > 0) {
-      const topTargetNum = parseInt(sorted[0][0]);
-      await supabaseClient.from('game_state').update({
-        current_night_kills: [topTargetNum]
-      }).eq('id', 1);
-    }
+    const topTargets = sorted.slice(0, limit).map(([targetNum]) => parseInt(targetNum));
+
+    await supabaseClient.from('game_state').update({
+      current_night_kills: topTargets
+    }).eq('id', 1);
   }
 }
 
@@ -2721,4 +3122,408 @@ function checkGameOverConditions(playerList) {
   }
 
   return null; // La partie continue
+}
+
+// ==========================================================================
+// ORCHESTRATEUR DE PARTIE AUTOMATIQUE GLOBAL (GM)
+// ==========================================================================
+
+function runGlobalAutoPilot() {
+  if (globalAutoPilotInterval) clearInterval(globalAutoPilotInterval);
+
+  globalAutoPilotInterval = setInterval(async () => {
+    if (!gameState || !gameState.phase) return;
+
+    const phase = gameState.phase;
+    const duration = gameState.timer_duration;
+    const startedAt = gameState.timer_started_at;
+
+    if (!startedAt || duration <= 0) return;
+
+    const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+    const left = duration - elapsed;
+
+    // 1. Gérer le bouton de rallonge de temps "+30s"
+    const addTimeBtn = document.getElementById('btn-gm-add-time');
+    if (addTimeBtn) {
+      if (['distributing', 'day_mayor_election', 'day_vote_tiebreak', 'night', 'day_announcement', 'day_discussion', 'day_vote'].includes(phase) && left > 0) {
+        addTimeBtn.classList.remove('hidden');
+      } else {
+        addTimeBtn.classList.add('hidden');
+      }
+    }
+
+    // Si le temps n'est pas expiré, on ne fait rien sauf conditions spéciales (ex: Maire a résolu)
+    if (left > 0) {
+      if (phase === 'day_vote_tiebreak' && gameState.announcement_text === 'resolved') {
+        clearInterval(globalAutoPilotInterval);
+        await finishDayVoteTiebreak(true);
+        runGlobalAutoPilot();
+      }
+      return;
+    }
+
+    // Le temps est expiré ! Transition automatique
+    console.log(`[Auto-Pilot] Temps expiré pour la phase : ${phase}`);
+    clearInterval(globalAutoPilotInterval);
+
+    try {
+      if (phase === 'distributing') {
+        await startMayorElection();
+      } 
+      else if (phase === 'day_mayor_election') {
+        await resolveMayorElection();
+      } 
+      else if (phase === 'night') {
+        if (gameState.night_phase === 'none') {
+          await wakeUpVillage();
+        } else {
+          await advanceNightStep();
+        }
+      } 
+      else if (phase === 'day_announcement') {
+        await startDayDiscussion();
+      } 
+      else if (phase === 'day_discussion') {
+        await startDayVote();
+      } 
+      else if (phase === 'day_vote') {
+        await resolveDayVote();
+      }
+      else if (phase === 'day_vote_tiebreak') {
+        await finishDayVoteTiebreak(false);
+      }
+    } catch (err) {
+      console.error("Erreur lors de la transition automatique:", err);
+    }
+
+    runGlobalAutoPilot();
+  }, 1000);
+}
+
+async function startMayorElection() {
+  const clean = players.map(p => supabaseClient.from('players').update({ vote_target: null }).eq('id', p.id));
+  await Promise.all(clean);
+
+  await supabaseClient.from('game_state').update({
+    phase: 'day_mayor_election',
+    timer_duration: configMayorTimerVal,
+    timer_started_at: new Date().toISOString(),
+    announcement_text: ''
+  }).eq('id', 1);
+}
+
+async function resolveMayorElection() {
+  const { data: activePlayers } = await supabaseClient
+    .from('players')
+    .select('id, name, number, vote_target')
+    .eq('status', 'alive');
+
+  if (!activePlayers || activePlayers.length === 0) {
+    await advanceToNight();
+    return;
+  }
+
+  const counts = {};
+  activePlayers.forEach(p => {
+    if (p.vote_target) {
+      const num = parseInt(p.vote_target);
+      if (!isNaN(num)) {
+        counts[num] = (counts[num] || 0) + 1;
+      }
+    }
+  });
+
+  let mayorNum = null;
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (sorted.length > 0) {
+    const maxVotes = sorted[0][1];
+    const candidates = sorted.filter(c => c[1] === maxVotes).map(c => parseInt(c[0]));
+    mayorNum = candidates[Math.floor(Math.random() * candidates.length)];
+  } else {
+    const randPlayer = activePlayers[Math.floor(Math.random() * activePlayers.length)];
+    if (randPlayer) mayorNum = randPlayer.number;
+  }
+
+  const mayorPlayer = activePlayers.find(p => p.number === mayorNum);
+  if (mayorPlayer) {
+    await supabaseClient.from('players').update({ is_mayor: true }).eq('id', mayorPlayer.id);
+    
+    await supabaseClient.from('game_state').update({
+      announcement_text: `👑 ${mayorPlayer.name} (N° ${mayorPlayer.number}) a été élu Maire !`
+    }).eq('id', 1);
+
+    setTimeout(async () => {
+      await advanceToNight();
+    }, 3000);
+  } else {
+    await advanceToNight();
+  }
+}
+
+async function wakeUpVillage() {
+  const { data: allPlayers } = await supabaseClient.from('players').select('*');
+  if (!allPlayers) return;
+
+  const kills = gameState.current_night_kills || [];
+  const saves = gameState.current_night_saves || [];
+  const poisons = gameState.current_night_poisons || [];
+
+  const deadThisNight = [];
+
+  kills.forEach(targetNum => {
+    if (!saves.includes(targetNum)) {
+      deadThisNight.push(targetNum);
+    }
+  });
+
+  poisons.forEach(targetNum => {
+    deadThisNight.push(targetNum);
+  });
+
+  let loverDied = false;
+  if (gameState.lovers && gameState.lovers.length === 2) {
+    const [lover1Id, lover2Id] = gameState.lovers;
+    const lover1 = allPlayers.find(p => p.id === lover1Id);
+    const lover2 = allPlayers.find(p => p.id === lover2Id);
+
+    if (lover1 && lover2) {
+      const l1Dead = deadThisNight.includes(lover1.number) || lover1.status === 'dead';
+      const l2Dead = deadThisNight.includes(lover2.number) || lover2.status === 'dead';
+
+      if (l1Dead && !l2Dead) {
+        deadThisNight.push(lover2.number);
+        loverDied = true;
+      } else if (l2Dead && !l1Dead) {
+        deadThisNight.push(lover1.number);
+        loverDied = true;
+      }
+    }
+  }
+
+  let announcement = "";
+  if (deadThisNight.length > 0) {
+    const uniqueDeads = [...new Set(deadThisNight)];
+    
+    const killUpdates = uniqueDeads.map(num => {
+      const p = allPlayers.find(x => x.number === num);
+      if (p) {
+        announcement += `☠️ <strong>${p.name}</strong> (N° ${p.number}), qui était <i>${ROLES_INFO[p.role]?.title || p.role}</i>.<br>`;
+        return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
+      }
+      return Promise.resolve();
+    });
+    await Promise.all(killUpdates);
+    
+    if (loverDied) {
+      announcement += `<br>💔 Deux amoureux ont été réunis dans la mort...`;
+    }
+  } else {
+    announcement = "🍀 Aucun mort cette nuit. Le village respire !";
+  }
+
+  const { data: updatedPlayers } = await supabaseClient.from('players').select('*');
+  const winners = checkGameOverConditions(updatedPlayers);
+
+  if (winners) {
+    await supabaseClient.from('game_state').update({
+      phase: 'game_over',
+      winners: winners,
+      announcement_text: announcement
+    }).eq('id', 1);
+  } else {
+    await supabaseClient.from('game_state').update({
+      phase: 'day_announcement',
+      announcement_text: announcement,
+      timer_duration: 10,
+      timer_started_at: new Date().toISOString()
+    }).eq('id', 1);
+  }
+}
+
+async function startDayDiscussion() {
+  await supabaseClient.from('game_state').update({
+    phase: 'day_discussion',
+    timer_duration: configDayTimerVal,
+    timer_started_at: new Date().toISOString()
+  }).eq('id', 1);
+}
+
+async function startDayVote() {
+  const cleanVotes = players.map(p => {
+    return supabaseClient.from('players').update({ vote_target: null }).eq('id', p.id);
+  });
+  await Promise.all(cleanVotes);
+
+  await supabaseClient.from('game_state').update({
+    phase: 'day_vote',
+    timer_duration: configVoteTimerVal,
+    timer_started_at: new Date().toISOString()
+  }).eq('id', 1);
+}
+
+async function resolveDayVote() {
+  const { data: alivePlayers } = await supabaseClient
+    .from('players')
+    .select('*')
+    .eq('status', 'alive');
+
+  if (!alivePlayers || alivePlayers.length === 0) return;
+
+  const totalAlive = alivePlayers.length;
+  const limit = Math.ceil(totalAlive / 10);
+
+  const votesCount = {};
+  alivePlayers.forEach(p => {
+    if (p.vote_target) {
+      const targets = p.vote_target.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+      targets.forEach(t => {
+        votesCount[t] = (votesCount[t] || 0) + 1;
+      });
+    }
+  });
+
+  const sorted = alivePlayers
+    .map(p => ({ player: p, votes: votesCount[p.number] || 0 }))
+    .sort((a, b) => b.votes - a.votes);
+
+  if (sorted.length === 0 || sorted[0].votes === 0) {
+    await announceNoDayElimination();
+    return;
+  }
+
+  const definitelyKill = [];
+  const tiedForLastSpot = [];
+
+  const boundaryVotes = sorted[Math.min(limit - 1, sorted.length - 1)].votes;
+
+  sorted.forEach(item => {
+    if (item.votes > boundaryVotes) {
+      definitelyKill.push(item.player);
+    } else if (item.votes === boundaryVotes && boundaryVotes > 0) {
+      tiedForLastSpot.push(item.player);
+    }
+  });
+
+  const spotsLeft = limit - definitelyKill.length;
+
+  if (tiedForLastSpot.length > spotsLeft && spotsLeft > 0) {
+    const mayor = alivePlayers.find(p => p.is_mayor);
+    if (mayor) {
+      const tiedNumbers = tiedForLastSpot.map(p => p.number).join(',');
+      await supabaseClient.from('game_state').update({
+        phase: 'day_vote_tiebreak',
+        announcement_text: `${spotsLeft}:${tiedNumbers}`,
+        timer_duration: 15,
+        timer_started_at: new Date().toISOString()
+      }).eq('id', 1);
+    } else {
+      shuffleArray(tiedForLastSpot);
+      const chosen = tiedForLastSpot.slice(0, spotsLeft);
+      await executeDayEliminations([...definitelyKill, ...chosen]);
+    }
+  } else {
+    const toKill = [...definitelyKill];
+    if (spotsLeft > 0) {
+      toKill.push(...tiedForLastSpot.slice(0, spotsLeft));
+    }
+    await executeDayEliminations(toKill);
+  }
+}
+
+async function finishDayVoteTiebreak(resolvedByMayor) {
+  if (resolvedByMayor) {
+    const { data: updatedPlayers } = await supabaseClient.from('players').select('*');
+    const winners = checkGameOverConditions(updatedPlayers);
+    if (winners) {
+      await supabaseClient.from('game_state').update({
+        phase: 'game_over',
+        winners: winners
+      }).eq('id', 1);
+    } else {
+      await advanceToNight();
+    }
+  } else {
+    const parts = (gameState.announcement_text || "").split(':');
+    const spotsLeft = parseInt(parts[0]) || 1;
+    const tiedNums = parts[1] ? parts[1].split(',').map(n => parseInt(n)) : [];
+
+    const { data: alivePlayers } = await supabaseClient
+      .from('players')
+      .select('*')
+      .eq('status', 'alive')
+      .in('number', tiedNums);
+
+    shuffleArray(alivePlayers);
+    const chosen = alivePlayers.slice(0, spotsLeft);
+
+    const updates = chosen.map(p => {
+      return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
+    });
+    await Promise.all(updates);
+
+    const { data: updatedPlayers } = await supabaseClient.from('players').select('*');
+    const winners = checkGameOverConditions(updatedPlayers);
+    if (winners) {
+      await supabaseClient.from('game_state').update({
+        phase: 'game_over',
+        winners: winners
+      }).eq('id', 1);
+    } else {
+      await advanceToNight();
+    }
+  }
+}
+
+async function executeDayEliminations(playersToKill) {
+  const updates = playersToKill.map(p => {
+    return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
+  });
+  await Promise.all(updates);
+
+  let loverDied = false;
+  if (gameState.lovers && gameState.lovers.length === 2) {
+    const [l1, l2] = gameState.lovers;
+    const deadIds = playersToKill.map(p => p.id);
+    if (deadIds.includes(l1) || deadIds.includes(l2)) {
+      const otherId = deadIds.includes(l1) ? l2 : l1;
+      await supabaseClient.from('players').update({ status: 'dead' }).eq('id', otherId);
+      loverDied = true;
+    }
+  }
+
+  let text = "☠️ Le village a éliminé :<br>";
+  playersToKill.forEach(p => {
+    text += `<strong>${p.name}</strong> (N° ${p.number}) qui était <i>${ROLES_INFO[p.role]?.title || p.role}</i>.<br>`;
+  });
+  if (loverDied) {
+    text += "💔 Un cœur s'est brisé... l'amoureux l'a suivi dans la tombe.";
+  }
+
+  const { data: updatedPlayers } = await supabaseClient.from('players').select('*');
+  const winners = checkGameOverConditions(updatedPlayers);
+
+  if (winners) {
+    await supabaseClient.from('game_state').update({
+      phase: 'game_over',
+      winners: winners,
+      announcement_text: text
+    }).eq('id', 1);
+  } else {
+    await supabaseClient.from('game_state').update({
+      phase: 'day_announcement',
+      announcement_text: text,
+      timer_duration: 8,
+      timer_started_at: new Date().toISOString()
+    }).eq('id', 1);
+  }
+}
+
+async function announceNoDayElimination() {
+  await supabaseClient.from('game_state').update({
+    phase: 'day_announcement',
+    announcement_text: "📣 Les villageois n'ont désigné aucun coupable aujourd'hui.",
+    timer_duration: 8,
+    timer_started_at: new Date().toISOString()
+  }).eq('id', 1);
 }

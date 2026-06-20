@@ -1080,3 +1080,27 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus {
   accent-color: var(--neon-blue);
   cursor: pointer;
 }
+
+/* Mayor/Maire indicators and panels */
+.mayor-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  background: linear-gradient(135deg, var(--neon-gold) 0%, #cc8800 100%);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  margin-left: 6px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-neon-gold);
+}
+
+.tableau-card.mayor::before {
+  content: '👑' !important;
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  font-size: 0.85rem;
+  color: var(--neon-gold) !important;
+  text-shadow: var(--shadow-neon-gold);
+}

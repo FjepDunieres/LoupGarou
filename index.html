@@ -122,7 +122,10 @@
       <div class="gm-main-panel glass fade-in">
         <div class="gm-status-header">
           <h2 id="gm-current-phase-title" class="title-glow">Lobby d'inscription</h2>
-          <span id="gm-phase-badge" class="phase-tag lobby">Lobby</span>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button id="btn-gm-add-time" class="btn btn-secondary btn-sm hidden" style="padding: 6px 12px; font-size: 0.8rem; border-color: var(--neon-gold); color: var(--neon-gold);">➕ 30s</button>
+            <span id="gm-phase-badge" class="phase-tag lobby">Lobby</span>
+          </div>
         </div>
 
         <!-- Section: Lobby Setup -->
@@ -150,11 +153,42 @@
             <div style="margin-bottom: 20px;">
               <label for="config-night-timer" style="display: block; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--color-muted); margin-bottom: 6px;">Durée limite des tours de nuit</label>
               <select id="config-night-timer" style="width: 100%; padding: 10px; border-radius: 8px;">
-                <option value="0">Désactivé (Avancement manuel)</option>
                 <option value="15">15 secondes</option>
                 <option value="20" selected>20 secondes</option>
                 <option value="30">30 secondes</option>
                 <option value="45">45 secondes</option>
+              </select>
+            </div>
+
+            <!-- Day discussion duration -->
+            <div style="margin-bottom: 20px;">
+              <label for="config-day-timer" style="display: block; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--color-muted); margin-bottom: 6px;">Durée des débats publics (Jour)</label>
+              <select id="config-day-timer" style="width: 100%; padding: 10px; border-radius: 8px;">
+                <option value="60">1 minute</option>
+                <option value="120">2 minutes</option>
+                <option value="180" selected>3 minutes</option>
+                <option value="300">5 minutes</option>
+              </select>
+            </div>
+
+            <!-- Day vote duration -->
+            <div style="margin-bottom: 20px;">
+              <label for="config-vote-timer" style="display: block; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--color-muted); margin-bottom: 6px;">Durée du vote du village (Jour)</label>
+              <select id="config-vote-timer" style="width: 100%; padding: 10px; border-radius: 8px;">
+                <option value="30">30 secondes</option>
+                <option value="45" selected>45 secondes</option>
+                <option value="60">1 minute</option>
+                <option value="90">1 minute 30</option>
+              </select>
+            </div>
+
+            <!-- Mayor election duration -->
+            <div style="margin-bottom: 20px;">
+              <label for="config-mayor-timer" style="display: block; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--color-muted); margin-bottom: 6px;">Durée du vote du Maire (Jour 1)</label>
+              <select id="config-mayor-timer" style="width: 100%; padding: 10px; border-radius: 8px;">
+                <option value="30">30 secondes</option>
+                <option value="45" selected>45 secondes</option>
+                <option value="60">1 minute</option>
               </select>
             </div>
 
@@ -635,15 +669,37 @@
         <!-- Phase: Day Vote -->
         <div id="player-phase-day-vote" class="glass active-action-panel fade-in hidden">
           <h3 style="color: var(--neon-gold); margin-bottom: 5px; text-align: center;">🗳️ Vote de l'Assemblée</h3>
-          <p style="color: var(--color-muted); text-align: center; font-size: 0.85rem; margin-bottom: 20px;">Sélectionnez le joueur que vous suspectez d'être un Loup-Garou.</p>
+          <p id="player-day-vote-instructions" style="color: var(--color-muted); text-align: center; font-size: 0.85rem; margin-bottom: 20px;">Sélectionnez de 0 à 3 suspect(s) à éliminer.</p>
           
           <div id="day-vote-search-list" class="vote-search-list">
             <!-- Rendered in JS -->
           </div>
           
           <div id="player-vote-confirm-box" style="text-align: center; margin-top: 15px;" class="hidden">
-            Votre vote actuel : <span id="player-voted-target-name" style="font-weight: 800; color: var(--neon-red);">Personne</span>
+            Votes actuels : <span id="player-voted-target-name" style="font-weight: 800; color: var(--neon-red);">Personne</span>
           </div>
+        </div>
+
+        <!-- Phase: Day Mayor Election -->
+        <div id="player-phase-day-mayor" class="glass active-action-panel fade-in hidden">
+          <h3 style="color: var(--neon-blue); margin-bottom: 5px; text-align: center;">👑 Élection du Maire</h3>
+          <p style="color: var(--color-muted); text-align: center; font-size: 0.85rem; margin-bottom: 20px;">Votez pour le joueur qui deviendra le maire du village.</p>
+          <div id="day-mayor-search-list" class="vote-search-list">
+            <!-- Rendered in JS -->
+          </div>
+          <div id="player-mayor-confirm-box" style="text-align: center; margin-top: 15px;" class="hidden">
+            Votre vote : <span id="player-mayor-target-name" style="font-weight: 800; color: var(--neon-blue);">Personne</span>
+          </div>
+        </div>
+
+        <!-- Phase: Mayor Tiebreak (Tranchage du vote) -->
+        <div id="player-phase-mayor-tiebreak" class="glass active-action-panel fade-in hidden">
+          <h3 style="color: var(--neon-red); margin-bottom: 5px; text-align: center;">⚖️ Choix du Maire</h3>
+          <p id="mayor-tiebreak-instructions" style="color: var(--color-muted); text-align: center; font-size: 0.85rem; margin-bottom: 20px;">Vous devez trancher l'égalité ! Choisissez qui éliminer.</p>
+          <div id="mayor-tiebreak-search-list" class="vote-search-list">
+            <!-- Rendered in JS -->
+          </div>
+          <button id="btn-submit-mayor-tiebreak" class="btn btn-danger" style="width: 100%; margin-top: 15px;" disabled>Confirmer la décision</button>
         </div>
 
         <!-- Phase: Game Over -->

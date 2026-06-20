@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS players (
     is_online BOOLEAN DEFAULT TRUE,
     last_seen TIMESTAMPTZ DEFAULT NOW(),
     charmed BOOLEAN DEFAULT FALSE, -- Indique si le joueur est charmé par le flûteur
-    vote_target INT DEFAULT NULL, -- Numéro du joueur ciblé par le vote
+    vote_target TEXT DEFAULT NULL, -- Numéros des joueurs ciblés par le vote (ex: "3,5")
+    is_mayor BOOLEAN DEFAULT FALSE, -- Indique si le joueur est le maire du village
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -52,7 +53,7 @@ ALTER TABLE players DISABLE ROW LEVEL SECURITY;
 -- 4. Fonction PL/pgSQL sécurisée pour rejoindre le lobby
 -- Assure l'attribution d'un numéro incrémental unique de 1 à N de manière transactionnelle
 CREATE OR REPLACE FUNCTION join_lobby(player_name TEXT)
-RETURNS TABLE (player_id UUID, player_number INT) AS $$
+RETURNS TABLE (player_id UUID, player_number INT) SECURITY DEFINER AS $$
 DECLARE
     next_num INT;
     new_id UUID;
@@ -75,7 +76,7 @@ $$ LANGUAGE plpgsql;
 -- 5. Fonction PL/pgSQL pour réinitialiser la partie
 -- Nettoie la table des joueurs et remet l'état général à zéro
 CREATE OR REPLACE FUNCTION reset_game()
-RETURNS VOID AS $$
+RETURNS VOID SECURITY DEFINER AS $$
 BEGIN
     DELETE FROM players;
     
