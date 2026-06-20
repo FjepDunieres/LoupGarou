@@ -34,11 +34,34 @@
 
 body {
   font-family: var(--font-main);
-  background: radial-gradient(circle at 50% 50%, var(--bg-deep) 0%, var(--bg-dark) 100%);
+  background: linear-gradient(-45deg, #07080d, #0e111a, #0b0713, #070d0c);
+  background-size: 400% 400%;
+  animation: gradientMove 20s ease infinite;
   color: var(--color-text);
   min-height: 100vh;
   overflow-x: hidden;
   line-height: 1.6;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 50vw;
+  height: 50vw;
+  max-width: 500px;
+  max-height: 500px;
+  min-width: 250px;
+  min-height: 250px;
+  background-image: url('assets/logo.png');
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 0.015;
+  pointer-events: none;
+  z-index: -1;
 }
 
 /* Base Glassmorphism utility classes */
@@ -80,8 +103,55 @@ body {
   50% { opacity: 0.8; }
 }
 
+@keyframes gradientMove {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes pop-in {
+  0% { transform: scale(0); opacity: 0; }
+  70% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@keyframes pulse-blue {
+  0% { box-shadow: 0 0 0 0 rgba(0, 210, 255, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(0, 210, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 210, 255, 0); }
+}
+
 .shake {
   animation: shake 0.6s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+.fade-in {
+  animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Transitions dynamiques et effets de survol premium */
+.btn, input[type="text"], input[type="password"], input[type="number"], select, .tableau-card, .vote-item, .lobby-player-card, .glass {
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.tableau-card.alive:hover {
+  box-shadow: 0 0 20px rgba(0, 210, 255, 0.25);
+  border-color: rgba(0, 210, 255, 0.4);
+  transform: translateY(-2px) scale(1.04);
+  z-index: 10;
+}
+
+.tableau-card.dead:hover {
+  opacity: 0.5;
+  transform: scale(0.97);
 }
 
 /* App Containers */
@@ -359,7 +429,7 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus {
   margin-bottom: 15px;
   font-size: 1.8rem;
   opacity: 0.8;
-  animation: float 4s ease-in-out infinite;
+  animation: float 4s ease-in-out infinite, pulse-blue 2s infinite;
 }
 
 /* Sleep / Night Screen overlay */
@@ -609,8 +679,10 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus {
 
 .tableau-card.dead {
   opacity: 0.35;
-  background: rgba(0, 0, 0, 0.4);
-  border-color: rgba(255, 51, 102, 0.1);
+  background: rgba(10, 5, 5, 0.6);
+  border-color: rgba(255, 51, 102, 0.2);
+  filter: grayscale(80%) sepia(20%) hue-rotate(320deg);
+  transition: all 0.8s ease;
 }
 
 .tableau-card.dead .t-num {
@@ -652,7 +724,7 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus {
   font-weight: 800;
   box-shadow: var(--shadow-neon-red);
   border: 2px solid var(--bg-dark);
-  animation: pulse-glow 1.5s infinite;
+  animation: pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both, pulse-glow 1.5s infinite 0.35s;
 }
 
 /* ==========================================================================
@@ -946,3 +1018,65 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus {
   }
 }
 
+/* Dynamic Timer Colors */
+.timer-normal {
+  color: var(--neon-blue) !important;
+  text-shadow: var(--shadow-neon-blue) !important;
+}
+
+.timer-warning {
+  color: var(--neon-gold) !important;
+  text-shadow: var(--shadow-neon-gold) !important;
+}
+
+.timer-critical {
+  color: var(--neon-red) !important;
+  text-shadow: var(--shadow-neon-red) !important;
+  animation: pulse-glow 0.8s infinite;
+}
+
+/* Spectator Mode Styles */
+.spectator-panel {
+  background: rgba(0, 245, 212, 0.02) !important;
+  border-color: rgba(0, 245, 212, 0.15) !important;
+  box-shadow: 0 4px 30px rgba(0, 245, 212, 0.05) inset !important;
+}
+
+.memorial-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.memorial-item.dead {
+  border-color: rgba(255, 51, 102, 0.1);
+  background: rgba(255, 51, 102, 0.02);
+}
+
+.memorial-role {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+/* Specific styling for config checkboxes */
+#config-roles-list label {
+  transition: var(--transition);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+#config-roles-list label:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+#config-roles-list input[type="checkbox"] {
+  accent-color: var(--neon-blue);
+  cursor: pointer;
+}

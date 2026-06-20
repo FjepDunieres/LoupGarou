@@ -15,6 +15,13 @@ let selectedGardeTarget = null; // Garde
 let selectedVoyanteTarget = null; // Voyante
 let selectedPoisonTarget = null; // Sorcière
 let isCardFlipped = false;
+let lastTableauPhase = null;
+
+// Configuration de la partie
+let configWolvesCount = 2;
+let configNightTimerVal = 20; // 20s par défaut
+let nightTurnTimeout = null; // Pour le countdown nocturne automatique
+let spectatorChannel = null;
 
 // Variables pour le minuteur
 let timerInterval = null;
@@ -209,6 +216,7 @@ async function initPlayer() {
   showPlayerStep('player-step-join');
 
   document.getElementById('btn-player-join').addEventListener('click', async () => {
+    if (navigator.vibrate) navigator.vibrate(30);
     const nameInput = document.getElementById('player-name-input').value.trim();
     if (!nameInput) {
       alert("Veuillez saisir votre prénom.");
@@ -254,7 +262,11 @@ function showPlayerStep(stepId) {
   steps.forEach(id => {
     document.getElementById(id).classList.add('hidden');
   });
-  document.getElementById(stepId).classList.remove('hidden');
+  const el = document.getElementById(stepId);
+  el.classList.remove('hidden');
+  el.classList.remove('fade-in');
+  void el.offsetWidth;
+  el.classList.add('fade-in');
 }
 
 // Inscriptions aux canaux temps réel pour le joueur
@@ -317,9 +329,12 @@ function handleMyPlayerUpdate() {
     
     // Révéler le rôle sur l'écran des morts
     if (myPlayer.role && ROLES_INFO[myPlayer.role]) {
-      document.getElementById('player-dead-role-name').textContent = ROLES_INFO[myPlayer.role].title;
+      document.getElementById('player-dead-role-name').textContent = myPlayer.role === 'chasseur' ? 'Chasseur ☠️' : ROLES_INFO[myPlayer.role].title;
     }
     
+    // Rendre le mode spectre
+    renderSpectatorMode();
+
     // Si c'est le chasseur qui vient de mourir, lui permettre de tirer avant de désactiver son écran
     if (myPlayer.role === 'chasseur' && !myPlayer.vote_target) {
       showChasseurDeathPanel();
@@ -347,18 +362,23 @@ function handleGameStateUpdate() {
   showPlayerStep('player-step-game');
 
   // Masquer toutes les sous-phases joueurs
-  document.getElementById('player-phase-distribute').classList.add('hidden');
-  document.getElementById('player-phase-night-sleep').classList.add('hidden');
-  document.getElementById('player-phase-night-action').classList.add('hidden');
-  document.getElementById('player-phase-day-announcement').classList.add('hidden');
-  document.getElementById('player-phase-day-discussion').classList.add('hidden');
-  document.getElementById('player-phase-day-vote').classList.add('hidden');
-  document.getElementById('player-phase-game-over').classList.add('hidden');
+  const phases = [
+    'player-phase-distribute', 'player-phase-night-sleep', 'player-phase-night-action',
+    'player-phase-day-announcement', 'player-phase-day-discussion', 'player-phase-day-vote',
+    'player-phase-game-over'
+  ];
+  phases.forEach(id => document.getElementById(id).classList.add('hidden'));
+
+  if (myPlayer && myPlayer.status === 'dead') {
+    renderSpectatorMode();
+    return;
+  }
 
   if (myPlayer && myPlayer.status === 'alive') {
+    let activePhaseId = null;
     switch (gameState.phase) {
       case 'distributing':
-        document.getElementById('player-phase-distribute').classList.remove('hidden');
+        activePhaseId = 'player-phase-distribute';
         setupRoleCardReveal();
         break;
 
@@ -367,33 +387,44 @@ function handleGameStateUpdate() {
         const isMyTurn = (myPlayer.role === gameState.night_phase);
         
         if (isMyTurn) {
-          document.getElementById('player-phase-night-action').classList.remove('hidden');
+          activePhaseId = 'player-phase-night-action';
           setupNightActionPanel();
         } else {
-          document.getElementById('player-phase-night-sleep').classList.remove('hidden');
+          activePhaseId = 'player-phase-night-sleep';
           setupNightSleepPanel();
         }
         break;
 
       case 'day_announcement':
-        document.getElementById('player-phase-day-announcement').classList.remove('hidden');
+        activePhaseId = 'player-phase-day-announcement';
         document.getElementById('player-announcement-text').innerHTML = gameState.announcement_text || "Le village se réveille...";
         break;
 
       case 'day_discussion':
-        document.getElementById('player-phase-day-discussion').classList.remove('hidden');
+        activePhaseId = 'player-phase-day-discussion';
         startDiscussionTimer(gameState.timer_duration, gameState.timer_started_at);
         break;
 
       case 'day_vote':
-        document.getElementById('player-phase-day-vote').classList.remove('hidden');
+        activePhaseId = 'player-phase-day-vote';
         setupDayVotePanel();
         break;
 
       case 'game_over':
-        document.getElementById('player-phase-game-over').classList.remove('hidden');
+        activePhaseId = 'player-phase-game-over';
         document.getElementById('player-winners-name').textContent = (gameState.winners || "Inconnu").toUpperCase();
         break;
+    }
+
+    if (activePhaseId) {
+      const activeEl = document.getElementById(activePhaseId);
+      activeEl.classList.remove('hidden');
+      if (gameState.phase !== activeEl.dataset.lastPhase) {
+        activeEl.dataset.lastPhase = gameState.phase;
+        activeEl.classList.remove('fade-in');
+        void activeEl.offsetWidth; // Reflow
+        activeEl.classList.add('fade-in');
+      }
     }
   }
 }
@@ -426,6 +457,7 @@ function setupRoleCardReveal() {
     if (!isCardFlipped) {
       cardInner.classList.add('flipped');
       isCardFlipped = true;
+      if (navigator.vibrate) navigator.vibrate(80);
     }
   };
 }
@@ -466,6 +498,31 @@ function setupNightSleepPanel() {
 
 // --- ACTIONS INTERACTIVES DE NUIT ---
 async function setupNightActionPanel() {
+  // Gérer le minuteur de tour nocturne
+  const timerContainer = document.getElementById('player-night-timer-container');
+  const timerVal = document.getElementById('player-night-timer');
+  
+  if (gameState.timer_duration > 0 && gameState.timer_started_at) {
+    timerContainer.classList.remove('hidden');
+    if (timerInterval) clearInterval(timerInterval);
+    const start = new Date(gameState.timer_started_at).getTime();
+    
+    const updateNightTimer = () => {
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+      const left = gameState.timer_duration - elapsed;
+      if (left <= 0) {
+        timerVal.textContent = "0s";
+        clearInterval(timerInterval);
+      } else {
+        timerVal.textContent = `${left}s`;
+      }
+    };
+    updateNightTimer();
+    timerInterval = setInterval(updateNightTimer, 1000);
+  } else {
+    timerContainer.classList.add('hidden');
+  }
+
   // Masquer tous les sous-panneaux
   document.getElementById('action-cupidon-panel').classList.add('hidden');
   document.getElementById('action-garde-panel').classList.add('hidden');
@@ -583,6 +640,7 @@ function renderSelectableList(containerId, list, maxSelect, preselectedArray, on
     `;
 
     item.addEventListener('click', () => {
+      if (navigator.vibrate) navigator.vibrate(20);
       if (maxSelect === 1) {
         if (selected.includes(p.id)) {
           selected = [];
@@ -615,6 +673,7 @@ function renderSelectableList(containerId, list, maxSelect, preselectedArray, on
 // Écouteurs pour la validation des choix de nuit
 document.getElementById('btn-submit-cupidon').addEventListener('click', async () => {
   if (selectedLoverTargets.length === 2) {
+    if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
     document.getElementById('btn-submit-cupidon').disabled = true;
     const { error } = await supabaseClient
       .from('game_state')
@@ -630,6 +689,7 @@ document.getElementById('btn-submit-cupidon').addEventListener('click', async ()
 
 document.getElementById('btn-submit-garde').addEventListener('click', async () => {
   if (selectedGardeTarget) {
+    if (navigator.vibrate) navigator.vibrate(40);
     document.getElementById('btn-submit-garde').disabled = true;
     const { data: targetPlayer } = await supabaseClient.from('players').select('number').eq('id', selectedGardeTarget).single();
     if (targetPlayer) {
@@ -650,6 +710,7 @@ document.getElementById('btn-submit-garde').addEventListener('click', async () =
 
 document.getElementById('btn-submit-voyante').addEventListener('click', async () => {
   if (selectedVoyanteTarget) {
+    if (navigator.vibrate) navigator.vibrate(40);
     document.getElementById('btn-submit-voyante').disabled = true;
     
     // Obtenir le rôle du joueur ciblé
@@ -675,6 +736,7 @@ document.getElementById('btn-submit-voyante').addEventListener('click', async ()
 
 document.getElementById('btn-submit-fluteur').addEventListener('click', async () => {
   if (selectedFluteurTargets.length === 2) {
+    if (navigator.vibrate) navigator.vibrate(40);
     document.getElementById('btn-submit-fluteur').disabled = true;
 
     // Mettre à jour les deux joueurs comme charmés dans la BDD
@@ -761,6 +823,7 @@ function setupSorciereInterface(alivePlayers) {
 
   // Action globale Sorcière : Passer/Valider
   document.getElementById('btn-submit-sorciere').onclick = async () => {
+    if (navigator.vibrate) navigator.vibrate(40);
     // Mettre à jour vote_target pour indiquer à la BDD qu'elle a passé son tour
     await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', myPlayer.id);
     document.getElementById('action-sorciere-panel').classList.add('hidden');
@@ -876,8 +939,19 @@ function startDiscussionTimer(duration, startedAt) {
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
     const timeLeft = duration - elapsed;
 
+    // Apply colors dynamically
+    timerEl.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+    if (timeLeft > 60) {
+      timerEl.classList.add('timer-normal');
+    } else if (timeLeft > 15) {
+      timerEl.classList.add('timer-warning');
+    } else {
+      timerEl.classList.add('timer-critical');
+    }
+
     if (timeLeft <= 0) {
       timerEl.textContent = "00:00";
+      timerEl.classList.remove('timer-critical');
       clearInterval(timerInterval);
     } else {
       timerEl.textContent = formatTime(timeLeft);
@@ -936,6 +1010,119 @@ async function showChasseurDeathPanel() {
   };
 }
 
+// --- MODE SPECTATEUR POUR LES MORTS ---
+function subscribeSpectatorPlayers() {
+  if (spectatorChannel) return;
+  spectatorChannel = supabaseClient
+    .channel('spectator_players')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'players' }, async () => {
+      const { data } = await supabaseClient.from('players').select('*').order('number');
+      if (data) {
+        players = data;
+        renderSpectatorMode();
+      }
+    })
+    .subscribe();
+}
+
+async function renderSpectatorMode() {
+  subscribeSpectatorPlayers();
+
+  const specPhase = document.getElementById('spec-phase');
+  const specAlive = document.getElementById('spec-alive');
+  const specTimerContainer = document.getElementById('spec-timer-container');
+  const specTimer = document.getElementById('spec-timer');
+  const specVotesContainer = document.getElementById('spec-votes-container');
+  const specVotesList = document.getElementById('spec-votes-list');
+  const specPlayersList = document.getElementById('spec-players-list');
+
+  if (!specPhase) return;
+
+  // Charger la liste complète des joueurs si elle est vide
+  if (players.length === 0) {
+    const { data } = await supabaseClient.from('players').select('*').order('number');
+    if (data) players = data;
+  }
+
+  // 1. Phase et statut de vie
+  specPhase.textContent = gameState.phase || 'Lobby';
+  const aliveCount = players.filter(p => p.status === 'alive').length;
+  specAlive.textContent = `${aliveCount} / ${players.length}`;
+
+  // 2. Minuteur débat
+  if (gameState.phase === 'day_discussion' && gameState.timer_started_at) {
+    specTimerContainer.classList.remove('hidden');
+    const start = new Date(gameState.timer_started_at).getTime();
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    const left = gameState.timer_duration - elapsed;
+    specTimer.textContent = formatTime(Math.max(0, left));
+
+    specTimer.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+    if (left > 60) specTimer.classList.add('timer-normal');
+    else if (left > 15) specTimer.classList.add('timer-warning');
+    else specTimer.classList.add('timer-critical');
+  } else {
+    specTimerContainer.classList.add('hidden');
+  }
+
+  // 3. Tendance des votes (temps réel)
+  if (gameState.phase === 'day_vote') {
+    specVotesContainer.classList.remove('hidden');
+    specVotesList.innerHTML = '';
+
+    const votesTally = {};
+    players.forEach(p => {
+      if (p.status === 'alive' && p.vote_target) {
+        votesTally[p.vote_target] = (votesTally[p.vote_target] || 0) + 1;
+      }
+    });
+
+    const sorted = Object.entries(votesTally).sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) {
+      specVotesList.innerHTML = '<div style="color:var(--color-muted); font-size:0.75rem; text-align:center;">Aucun vote pour le moment...</div>';
+    } else {
+      sorted.forEach(([targetNum, count]) => {
+        const target = players.find(p => p.number === parseInt(targetNum));
+        specVotesList.innerHTML += `
+          <div style="display:flex; justify-content:space-between; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.02);">
+            <span>N° ${targetNum} ${target ? target.name : ''}</span>
+            <span style="color:var(--neon-red); font-weight:bold;">${count} votes</span>
+          </div>
+        `;
+      });
+    }
+  } else {
+    specVotesContainer.classList.add('hidden');
+  }
+
+  // 4. Liste mémorial avec rôles révélés
+  specPlayersList.innerHTML = '';
+  players.forEach(p => {
+    const item = document.createElement('div');
+    item.className = `memorial-item ${p.status === 'dead' ? 'dead' : ''}`;
+    item.style.fontSize = '0.75rem';
+    item.style.padding = '5px 8px';
+    item.style.display = 'flex';
+    item.style.justifyContent = 'space-between';
+    item.style.alignItems = 'center';
+    item.style.background = 'rgba(255,255,255,0.02)';
+    item.style.borderRadius = '6px';
+    item.style.border = '1px solid rgba(255,255,255,0.03)';
+
+    let roleText = '';
+    if (p.status === 'dead') {
+      roleText = `<span class="memorial-role" style="color:var(--neon-red); text-decoration:line-through; font-weight:800; font-size:0.7rem;">☠️ ${ROLES_INFO[p.role]?.title || p.role}</span>`;
+    } else {
+      roleText = `<span style="color:var(--neon-green); font-weight:bold; font-size:0.7rem;">🟢 En vie</span>`;
+    }
+
+    item.innerHTML = `
+      <span>N° ${p.number} <strong>${p.name}</strong></span>
+      <span>${roleText}</span>
+    `;
+    specPlayersList.appendChild(item);
+  });
+}
 
 // ==========================================================================
 // 2. ÉCRAN TABLEAU / PROJECTEUR (?role=tableau)
@@ -988,6 +1175,26 @@ function renderTableau() {
   if (!gameState || !gameState.phase) {
     console.log("Game state not yet loaded, skipping renderTableau.");
     return;
+  }
+
+  // Phase transition visual trigger
+  if (lastTableauPhase !== gameState.phase) {
+    lastTableauPhase = gameState.phase;
+    if (gameState.phase === 'lobby') {
+      const container = document.getElementById('tab-lobby-container');
+      if (container) {
+        container.classList.remove('fade-in');
+        void container.offsetWidth;
+        container.classList.add('fade-in');
+      }
+    } else {
+      const grid = document.getElementById('tab-grid');
+      if (grid) {
+        grid.classList.remove('fade-in');
+        void grid.offsetWidth;
+        grid.classList.add('fade-in');
+      }
+    }
   }
 
   // 1. Mettre à jour les statistiques
@@ -1094,16 +1301,29 @@ function renderTableau() {
       // Démarrer minuteur
       if (gameState.timer_started_at) {
         const start = new Date(gameState.timer_started_at).getTime();
-        timerInterval = setInterval(() => {
+        const updateTabTimer = () => {
           const elapsed = Math.floor((Date.now() - start) / 1000);
           const left = gameState.timer_duration - elapsed;
+
+          timerBox.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+          if (left > 60) {
+            timerBox.classList.add('timer-normal');
+          } else if (left > 15) {
+            timerBox.classList.add('timer-warning');
+          } else {
+            timerBox.classList.add('timer-critical');
+          }
+
           if (left <= 0) {
             timerBox.textContent = "00:00";
+            timerBox.classList.remove('timer-critical');
             clearInterval(timerInterval);
           } else {
             timerBox.textContent = formatTime(left);
           }
-        }, 1000);
+        };
+        updateTabTimer();
+        timerInterval = setInterval(updateTabTimer, 1000);
       }
       break;
 
@@ -1255,6 +1475,7 @@ async function showGMPanel() {
   });
 
   setupGMEventListeners();
+  setupSimulator();
 }
 
 async function syncGMData() {
@@ -1286,7 +1507,37 @@ function renderGMPanel() {
   // Rendu de la répartition estimée dans le lobby
   const previewBox = document.getElementById('gm-role-distribution-preview');
   previewBox.innerHTML = '';
-  const estRoles = getBalanceRolesArray(total);
+  
+  // Construire l'aperçu dynamique basé sur la config actuelle
+  const estRoles = [];
+  for (let i = 0; i < configWolvesCount; i++) estRoles.push('loup');
+  
+  const specialRoleMapping = {
+    'chk-role-voyante': 'voyante',
+    'chk-role-sorciere': 'sorciere',
+    'chk-role-chasseur': 'chasseur',
+    'chk-role-cupidon': 'cupidon',
+    'chk-role-garde': 'garde',
+    'chk-role-fluteur': 'fluteur',
+    'chk-role-ange': 'ange',
+    'chk-role-idiot': 'idiot',
+    'chk-role-ancien': 'ancien'
+  };
+  
+  for (const [chkId, roleKey] of Object.entries(specialRoleMapping)) {
+    const chk = document.getElementById(chkId);
+    if (chk && chk.checked) {
+      estRoles.push(roleKey);
+    }
+  }
+  
+  const reqCount = estRoles.length;
+  if (reqCount <= total) {
+    for (let i = 0; i < (total - reqCount); i++) {
+      estRoles.push('villageois');
+    }
+  }
+  
   const roleCounts = {};
   estRoles.forEach(r => roleCounts[r] = (roleCounts[r] || 0) + 1);
   for (const [r, count] of Object.entries(roleCounts)) {
@@ -1307,9 +1558,25 @@ function renderGMPanel() {
         <strong style="${p.status === 'dead' ? 'text-decoration:line-through; opacity:0.5;' : ''}">${p.name}</strong>
         ${p.role ? `<span class="role-badge ${ROLES_INFO[p.role]?.type || 'villageois'}" style="font-size:0.6rem;">${ROLES_INFO[p.role]?.title}</span>` : ''}
       </div>
-      <span class="status-dot ${isOffline ? '' : 'done'}"></span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="status-dot ${isOffline ? '' : 'done'}"></span>
+        <button class="btn-delete-player" data-id="${p.id}" style="background:none; border:none; color:var(--neon-red); cursor:pointer; font-size:0.95rem; padding:2px 4px; line-height:1;" title="Supprimer ce joueur">❌</button>
+      </div>
     `;
     listContainer.appendChild(item);
+  });
+
+  // Écouteurs de clic pour supprimer individuellement un joueur
+  listContainer.querySelectorAll('.btn-delete-player').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const playerId = btn.dataset.id;
+      const playerObj = players.find(x => x.id === playerId);
+      if (playerObj) {
+        if (confirm(`Voulez-vous vraiment supprimer le joueur ${playerObj.name} (N° ${playerObj.number}) ?`)) {
+          await deletePlayerAndShift(playerObj);
+        }
+      }
+    });
   });
 
   // Badge phase principale
@@ -1324,55 +1591,90 @@ function renderGMPanel() {
   ];
   sections.forEach(s => document.getElementById(s).classList.add('hidden'));
 
+  let activeSectionId = null;
   switch (gameState.phase) {
     case 'lobby':
-      document.getElementById('gm-section-lobby').classList.remove('hidden');
+      activeSectionId = 'gm-section-lobby';
       document.getElementById('gm-current-phase-title').textContent = "Lobby d'inscription";
       break;
 
     case 'distributing':
-      document.getElementById('gm-section-lobby').classList.remove('hidden');
+      activeSectionId = 'gm-section-lobby';
       document.getElementById('gm-current-phase-title').textContent = "Distribution des cartes...";
       // Ajouter un bouton rapide pour passer à la nuit
       document.getElementById('btn-gm-start-game').textContent = "Distribution en cours... Lancer la Nuit ➔";
       break;
 
     case 'night':
-      document.getElementById('gm-section-night').classList.remove('hidden');
+      activeSectionId = 'gm-section-night';
       document.getElementById('gm-current-phase-title').textContent = "Gestion de la Nuit";
       renderGMNightControls();
       break;
 
     case 'day_announcement':
-      document.getElementById('gm-section-day-announcement').classList.remove('hidden');
+      activeSectionId = 'gm-section-day-announcement';
       document.getElementById('gm-current-phase-title').textContent = "Annonces matinales";
       document.getElementById('gm-announcement-deaths').innerHTML = gameState.announcement_text || "Aucun mort ce matin.";
       break;
 
     case 'day_discussion':
-      document.getElementById('gm-section-day-discussion').classList.remove('hidden');
+      activeSectionId = 'gm-section-day-discussion';
       document.getElementById('gm-current-phase-title').textContent = "Débats du Village";
       
       // Timer débat
       if (gameState.timer_started_at) {
         const start = new Date(gameState.timer_started_at).getTime();
         const left = gameState.timer_duration - Math.floor((Date.now() - start) / 1000);
-        document.getElementById('gm-discussion-timer').textContent = formatTime(left);
+        const timerEl = document.getElementById('gm-discussion-timer');
+        timerEl.textContent = formatTime(left);
+
+        timerEl.classList.remove('timer-normal', 'timer-warning', 'timer-critical');
+        if (left > 60) {
+          timerEl.classList.add('timer-normal');
+        } else if (left > 15) {
+          timerEl.classList.add('timer-warning');
+        } else {
+          timerEl.classList.add('timer-critical');
+        }
       }
       break;
 
     case 'day_vote':
-      document.getElementById('gm-section-day-vote').classList.remove('hidden');
+      activeSectionId = 'gm-section-day-vote';
       document.getElementById('gm-current-phase-title').textContent = "Votes du Village";
       renderGMVoteControls();
       break;
 
     case 'game_over':
-      document.getElementById('gm-section-game-over').classList.remove('hidden');
+      activeSectionId = 'gm-section-game-over';
       document.getElementById('gm-current-phase-title').textContent = "Fin de Partie";
       document.getElementById('gm-winner-announcement').textContent = (gameState.winners || "Inconnu").toUpperCase();
       break;
   }
+
+  if (activeSectionId) {
+    const activeEl = document.getElementById(activeSectionId);
+    activeEl.classList.remove('hidden');
+    if (gameState.phase !== activeEl.dataset.lastPhase) {
+      activeEl.dataset.lastPhase = gameState.phase;
+      activeEl.classList.remove('fade-in');
+      void activeEl.offsetWidth; // Reflow
+      activeEl.classList.add('fade-in');
+    }
+  }
+  
+  // Lancer l'auto-pilotage si minuteur de nuit configuré
+  if (gameState.phase === 'night' && gameState.night_phase !== 'none' && configNightTimerVal > 0) {
+    manageNightAutoPilot();
+  } else {
+    if (nightTurnTimeout) {
+      clearTimeout(nightTurnTimeout);
+      nightTurnTimeout = null;
+    }
+  }
+
+  // Mettre à jour l'état du simulateur
+  updateSimulatorState();
 }
 
 // Rendu des contrôles de la Nuit
@@ -1504,8 +1806,226 @@ function renderGMVoteControls() {
   }
 }
 
+// Réinitialisation douce de la partie (Garder les joueurs)
+async function softResetGame() {
+  const updates = players.map(p => {
+    return supabaseClient
+      .from('players')
+      .update({
+        role: null,
+        status: 'alive',
+        charmed: false,
+        vote_target: null
+      })
+      .eq('id', p.id);
+  });
+  await Promise.all(updates);
+
+  await supabaseClient
+    .from('game_state')
+    .update({
+      phase: 'lobby',
+      night_phase: 'none',
+      timer_duration: 0,
+      timer_started_at: null,
+      announcement_text: '',
+      lovers: [],
+      current_night_kills: [],
+      current_night_saves: [],
+      current_night_poisons: [],
+      witch_heal_used: false,
+      witch_poison_used: false,
+      winners: ''
+    })
+    .eq('id', 1);
+}
+
+// Supprimer un joueur et décaler les numéros des suivants
+async function deletePlayerAndShift(player) {
+  const num = player.number;
+  const id = player.id;
+
+  const { error: deleteError } = await supabaseClient.from('players').delete().eq('id', id);
+  if (deleteError) {
+    console.error("Erreur suppression joueur:", deleteError);
+    alert("Impossible de supprimer le joueur.");
+    return;
+  }
+
+  // Sélectionner les joueurs restants avec un numéro supérieur
+  const { data: subsequent, error: selectError } = await supabaseClient
+    .from('players')
+    .select('id, number')
+    .gt('number', num);
+
+  if (selectError) {
+    console.log("Erreur selection joueurs suivants:", selectError);
+    return;
+  }
+
+  if (subsequent && subsequent.length > 0) {
+    const updates = subsequent.map(p => {
+      return supabaseClient
+        .from('players')
+        .update({ number: p.number - 1 })
+        .eq('id', p.id);
+    });
+    await Promise.all(updates);
+  }
+}
+
+// Mettre à jour la phase de nuit en base de données avec minuteurs
+async function setNightPhase(role) {
+  const duration = configNightTimerVal;
+  const startedAt = duration > 0 ? new Date().toISOString() : null;
+
+  const cleanUpdates = players.map(p => {
+    return supabaseClient.from('players').update({ vote_target: null }).eq('id', p.id);
+  });
+  await Promise.all(cleanUpdates);
+
+  await supabaseClient.from('game_state').update({
+    night_phase: role,
+    timer_duration: duration,
+    timer_started_at: startedAt
+  }).eq('id', 1);
+}
+
+// Passer à l'étape de nuit suivante
+async function advanceNightStep() {
+  if (nightTurnTimeout) clearTimeout(nightTurnTimeout);
+
+  const rolesSeq = ['cupidon', 'garde', 'voyante', 'loups', 'sorciere', 'fluteur', 'none'];
+  const current = gameState.night_phase;
+  let nextIdx = rolesSeq.indexOf(current) + 1;
+
+  while (nextIdx < rolesSeq.length - 1) {
+    const nextRole = rolesSeq[nextIdx];
+    const hasRoleAlive = players.some(p => p.role === nextRole && p.status === 'alive');
+    const isCupidonEligible = nextRole === 'cupidon' && (!gameState.lovers || gameState.lovers.length === 0);
+
+    if (hasRoleAlive || nextRole === 'loups' || (nextRole === 'cupidon' && isCupidonEligible)) {
+      break;
+    }
+    nextIdx++;
+  }
+
+  const nextRole = rolesSeq[nextIdx];
+
+  if (current === 'loups') {
+    await calculateLoupNightKill();
+  }
+
+  if (nextRole === 'none') {
+    await supabaseClient.from('game_state').update({ night_phase: 'none', timer_duration: 0, timer_started_at: null }).eq('id', 1);
+    alert("Fin des phases nocturnes. Vous pouvez réveiller le village.");
+  } else {
+    await setNightPhase(nextRole);
+  }
+}
+
+// Gérer l'auto-pilotage de la nuit côté GM
+function manageNightAutoPilot() {
+  if (nightTurnTimeout) return;
+
+  const role = gameState.night_phase;
+  const duration = gameState.timer_duration;
+  const startedAt = gameState.timer_started_at;
+  if (!startedAt || duration <= 0) return;
+
+  const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+  const left = duration - elapsed;
+
+  // 1. Expiration du timer
+  if (left <= 0) {
+    console.log(`[Auto-Pilot] Temps nocturne expiré pour ${role}. Passage automatique.`);
+    advanceNightStep();
+    return;
+  }
+
+  // 2. Cible ou action déjà validée
+  let actionCompleted = false;
+  if (role === 'loups') {
+    const livingWolves = players.filter(p => p.role === 'loup' && p.status === 'alive');
+    const votesDone = livingWolves.filter(w => w.vote_target).length;
+    if (livingWolves.length > 0 && votesDone === livingWolves.length) {
+      actionCompleted = true;
+    }
+  } else if (role === 'cupidon') {
+    if (gameState.lovers && gameState.lovers.length === 2) {
+      actionCompleted = true;
+    }
+  } else if (role === 'garde') {
+    if (gameState.current_night_saves && gameState.current_night_saves.length > 0) {
+      actionCompleted = true;
+    }
+  } else {
+    const activePlayer = players.find(p => p.role === role && p.status === 'alive');
+    if (activePlayer && activePlayer.vote_target === 999) {
+      actionCompleted = true;
+    }
+  }
+
+  if (actionCompleted) {
+    console.log(`[Auto-Pilot] Action nocturne validée pour ${role}. Transition dans 2.5s.`);
+    const delay = 2000 + Math.random() * 1000;
+    nightTurnTimeout = setTimeout(() => {
+      nightTurnTimeout = null;
+      advanceNightStep();
+    }, delay);
+    return;
+  }
+
+  nightTurnTimeout = setTimeout(() => {
+    nightTurnTimeout = null;
+    manageNightAutoPilot();
+  }, 1000);
+}
+
 // Événements boutons Game Master
 function setupGMEventListeners() {
+  // Configurer les boutons de modification de loups dans le Lobby
+  const wolvesVal = document.getElementById('config-wolves-val');
+  if (wolvesVal) {
+    document.getElementById('btn-config-wolves-minus').addEventListener('click', () => {
+      if (configWolvesCount > 1) {
+        configWolvesCount--;
+        wolvesVal.textContent = configWolvesCount;
+        syncGMData();
+      }
+    });
+    document.getElementById('btn-config-wolves-plus').addEventListener('click', () => {
+      if (configWolvesCount < 10) {
+        configWolvesCount++;
+        wolvesVal.textContent = configWolvesCount;
+        syncGMData();
+      }
+    });
+  }
+
+  // Écouter les changements des checkboxes
+  const checkboxes = [
+    'chk-role-voyante', 'chk-role-sorciere', 'chk-role-chasseur',
+    'chk-role-cupidon', 'chk-role-garde', 'chk-role-fluteur',
+    'chk-role-ange', 'chk-role-idiot', 'chk-role-ancien'
+  ];
+  checkboxes.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('change', () => {
+        syncGMData();
+      });
+    }
+  });
+
+  // Écouter le changement de minuteur de nuit
+  const nightTimerSelect = document.getElementById('config-night-timer');
+  if (nightTimerSelect) {
+    nightTimerSelect.addEventListener('change', () => {
+      configNightTimerVal = parseInt(nightTimerSelect.value);
+    });
+  }
+
   // Lancer la partie / Distribuer rôles
   document.getElementById('btn-gm-start-game').addEventListener('click', async () => {
     if (gameState.phase === 'distributing') {
@@ -1521,17 +2041,51 @@ function setupGMEventListeners() {
 
     document.getElementById('btn-gm-start-game').disabled = true;
 
-    // Distribuer les rôles localement et mettre à jour en bloc
-    const roles = getBalanceRolesArray(players.length);
+    // Distribuer les rôles selon la configuration du GM
+    const customRoles = [];
+    for (let i = 0; i < configWolvesCount; i++) {
+      customRoles.push('loup');
+    }
+
+    const specialRoleMapping = {
+      'chk-role-voyante': 'voyante',
+      'chk-role-sorciere': 'sorciere',
+      'chk-role-chasseur': 'chasseur',
+      'chk-role-cupidon': 'cupidon',
+      'chk-role-garde': 'garde',
+      'chk-role-fluteur': 'fluteur',
+      'chk-role-ange': 'ange',
+      'chk-role-idiot': 'idiot',
+      'chk-role-ancien': 'ancien'
+    };
+
+    for (const [chkId, roleKey] of Object.entries(specialRoleMapping)) {
+      const chk = document.getElementById(chkId);
+      if (chk && chk.checked) {
+        customRoles.push(roleKey);
+      }
+    }
+
+    if (customRoles.length > players.length) {
+      alert(`Erreur : Le nombre de rôles configurés (${customRoles.length}) dépasse le nombre de joueurs inscrits (${players.length}).`);
+      document.getElementById('btn-gm-start-game').disabled = false;
+      return;
+    }
+
+    const villagersCount = players.length - customRoles.length;
+    for (let i = 0; i < villagersCount; i++) {
+      customRoles.push('villageois');
+    }
+
     // Mélanger les rôles
-    shuffleArray(roles);
+    shuffleArray(customRoles);
 
     // Mettre à jour chaque joueur avec son rôle
     const updates = players.map((p, idx) => {
       return supabaseClient
         .from('players')
         .update({
-          role: roles[idx],
+          role: customRoles[idx],
           status: 'alive',
           charmed: false,
           vote_target: null
@@ -1556,48 +2110,9 @@ function setupGMEventListeners() {
     document.getElementById('btn-gm-start-game').disabled = false;
   });
 
-  // Avancement manuel du tour de nuit
+  // Avancement manuel/automatique du tour de nuit
   document.getElementById('btn-gm-next-night-phase').addEventListener('click', async () => {
-    const rolesSeq = ['cupidon', 'garde', 'voyante', 'loups', 'sorciere', 'fluteur', 'none'];
-    const current = gameState.night_phase;
-    let nextIdx = rolesSeq.indexOf(current) + 1;
-    
-    // Rechercher le prochain rôle vivant/éligible
-    while (nextIdx < rolesSeq.length - 1) {
-      const nextRole = rolesSeq[nextIdx];
-      const hasRoleAlive = players.some(p => p.role === nextRole && p.status === 'alive');
-      
-      // Cupidon n'est éligible que la première nuit (si la liste des amoureux est vide)
-      const isCupidonEligible = nextRole === 'cupidon' && (!gameState.lovers || gameState.lovers.length === 0);
-
-      if (hasRoleAlive || nextRole === 'loups' || (nextRole === 'cupidon' && isCupidonEligible)) {
-        break;
-      }
-      nextIdx++;
-    }
-
-    const nextRole = rolesSeq[nextIdx];
-
-    // Avant de quitter le tour des loups, faire le décompte de leur vote pour cibler la victime de la nuit
-    if (current === 'loups') {
-      await calculateLoupNightKill();
-    }
-
-    // Réinitialiser les vote_target de nuit de tout le monde pour ne pas polluer les phases
-    // sauf les loups car on a calculé leur cible, ou la sorcière. En gros on clean pour le matin.
-    if (nextRole === 'none') {
-      // Fin de la nuit
-      await supabaseClient.from('game_state').update({ night_phase: 'none' }).eq('id', 1);
-      alert("Fin des phases nocturnes. Vous pouvez réveiller le village.");
-    } else {
-      // Nettoyer les vote_target temporaires des joueurs
-      const cleanUpdates = players.map(p => {
-        return supabaseClient.from('players').update({ vote_target: null }).eq('id', p.id);
-      });
-      await Promise.all(cleanUpdates);
-
-      await supabaseClient.from('game_state').update({ night_phase: nextRole }).eq('id', 1);
-    }
+    await advanceNightStep();
   });
 
   // Bouton Réveiller le village
@@ -1776,19 +2291,272 @@ function setupGMEventListeners() {
     document.getElementById('btn-gm-confirm-vote-kill').disabled = false;
   });
 
-  // Recommencer une partie depuis l'écran de fin
+  // Recommencer une partie depuis l'écran de fin (Garder les joueurs)
   document.getElementById('btn-gm-restart-lobby').addEventListener('click', async () => {
-    if (confirm("Voulez-vous réinitialiser et relancer un lobby ?")) {
+    if (confirm("Recommencer une partie en conservant tous les joueurs actuels ?")) {
+      await softResetGame();
+    }
+  });
+
+  // Vider le salon depuis l'écran de fin (Supprimer les joueurs)
+  document.getElementById('btn-gm-clear-players').addEventListener('click', async () => {
+    if (confirm("Voulez-vous réinitialiser complètement le jeu et supprimer tous les joueurs ?")) {
       await supabaseClient.rpc('reset_game');
     }
   });
 
-  // Bouton de réinitialisation complète de la partie
+  // Recommencer une partie depuis la sidebar (Garder les joueurs)
+  document.getElementById('btn-gm-restart-lobby-sidebar').addEventListener('click', async () => {
+    if (confirm("Recommencer une partie en conservant tous les joueurs actuels ?")) {
+      await softResetGame();
+    }
+  });
+
+  // Bouton de réinitialisation complète de la partie (Supprimer les joueurs)
   document.getElementById('btn-gm-reset').addEventListener('click', async () => {
     if (confirm("ATTENTION : Cela supprimera tous les joueurs et réinitialisera le jeu. Continuer ?")) {
       await supabaseClient.rpc('reset_game');
     }
   });
+}
+
+// ==========================================================================
+// SIMULATEUR DE BOTS DE TEST (Game Master)
+// ==========================================================================
+let lastSimulatedPhase = null;
+let lastSimulatedSubPhase = null;
+let isSimulating = false;
+
+const BOT_NAMES = [
+  "Pierre", "Sophie", "Thomas", "Marie", "Nicolas", "Julien", "Camille", "Lucas", "Chloé", "Antoine",
+  "Mathieu", "Léa", "Alexandre", "Hugo", "Emma", "Manon", "Maxime", "Célia", "Valentin", "Pauline",
+  "Clément", "Élodie", "Arthur", "Laura", "Quentin", "Romain", "Sarah", "Guillaume", "Julie", "Bastien",
+  "Florian", "Audrey", "Maxence", "Justine", "Emile", "Aline", "Marc", "Alice", "Rémi", "Clara"
+];
+
+function setupSimulator() {
+  const generateBtn = document.getElementById('btn-sim-generate');
+  const triggerBtn = document.getElementById('btn-sim-trigger-actions');
+  
+  if (!generateBtn || !triggerBtn) return;
+  
+  generateBtn.addEventListener('click', async () => {
+    const input = document.getElementById('sim-bot-count');
+    const count = parseInt(input.value) || 12;
+    generateBtn.disabled = true;
+    await generateBots(count);
+    generateBtn.disabled = false;
+    await syncGMData();
+  });
+  
+  triggerBtn.addEventListener('click', async () => {
+    triggerBtn.disabled = true;
+    await simulateCurrentPhaseActions();
+    triggerBtn.disabled = false;
+    await syncGMData();
+  });
+}
+
+async function generateBots(count) {
+  const statusEl = document.getElementById('sim-status-text');
+  if (!statusEl) return;
+  
+  statusEl.textContent = "Génération des bots...";
+  
+  const names = [...BOT_NAMES];
+  shuffleArray(names);
+  
+  for (let i = 0; i < count; i++) {
+    const name = `[Bot] ${names[i % names.length]}${Math.floor(i / names.length) > 0 ? ' ' + Math.floor(i / names.length) : ''}`;
+    statusEl.textContent = `Création de ${name} (${i + 1}/${count})...`;
+    const { data, error } = await supabaseClient.rpc('join_lobby', { player_name: name });
+    if (error) {
+      console.error("Erreur lors de la création du bot:", error);
+    }
+  }
+  
+  statusEl.textContent = `${count} bots créés avec succès.`;
+}
+
+function updateSimulatorState() {
+  const triggerBtn = document.getElementById('btn-sim-trigger-actions');
+  const statusText = document.getElementById('sim-status-text');
+  
+  if (!triggerBtn || !statusText) return;
+  
+  const hasBots = players.some(p => p.name.startsWith('[Bot]'));
+  if (!hasBots) {
+    triggerBtn.disabled = true;
+    statusText.textContent = "Aucun bot dans la partie.";
+    return;
+  }
+  
+  let needsAction = false;
+  let actionDesc = "";
+  
+  if (gameState.phase === 'night' && gameState.night_phase !== 'none') {
+    needsAction = true;
+    actionDesc = `Action de nuit : ${ROLES_INFO[gameState.night_phase]?.title || gameState.night_phase}`;
+  } else if (gameState.phase === 'day_vote') {
+    needsAction = true;
+    actionDesc = "Vote public du jour";
+  }
+  
+  if (needsAction) {
+    triggerBtn.disabled = false;
+    statusText.textContent = `En attente : ${actionDesc}`;
+    
+    const autoPilot = document.getElementById('sim-auto-pilot').checked;
+    const alreadySimulated = (lastSimulatedPhase === gameState.phase && lastSimulatedSubPhase === gameState.night_phase);
+    
+    if (autoPilot && !alreadySimulated && !isSimulating) {
+      isSimulating = true;
+      statusText.textContent = `Simulation auto dans 2s...`;
+      
+      const phaseAtSchedule = gameState.phase;
+      const subPhaseAtSchedule = gameState.night_phase;
+      
+      setTimeout(async () => {
+        if (gameState.phase === phaseAtSchedule && gameState.night_phase === subPhaseAtSchedule) {
+          await simulateCurrentPhaseActions();
+          await syncGMData();
+        }
+        isSimulating = false;
+      }, 2000);
+    }
+  } else {
+    triggerBtn.disabled = true;
+    statusText.textContent = "Aucune action requise.";
+  }
+}
+
+async function simulateCurrentPhaseActions() {
+  const statusText = document.getElementById('sim-status-text');
+  if (statusText) statusText.textContent = "Simulation des actions en cours...";
+  
+  lastSimulatedPhase = gameState.phase;
+  lastSimulatedSubPhase = gameState.night_phase;
+  
+  const botPlayers = players.filter(p => p.name.startsWith('[Bot]') && p.status === 'alive');
+  const allAlive = players.filter(p => p.status === 'alive');
+  
+  if (botPlayers.length === 0) {
+    if (statusText) statusText.textContent = "Aucun bot vivant à simuler.";
+    return;
+  }
+  
+  if (gameState.phase === 'night') {
+    const role = gameState.night_phase;
+    const botWithRole = botPlayers.filter(p => p.role === role);
+    
+    if (role === 'loups') {
+      const botWolves = botPlayers.filter(p => p.role === 'loup');
+      if (botWolves.length > 0) {
+        const targets = allAlive.filter(p => p.role !== 'loup');
+        if (targets.length > 0) {
+          const target = targets[Math.floor(Math.random() * targets.length)];
+          const updates = botWolves.map(wolf => {
+            return supabaseClient.from('players').update({ vote_target: target.number }).eq('id', wolf.id);
+          });
+          await Promise.all(updates);
+          if (statusText) statusText.textContent = `Les loups bots ont voté pour N° ${target.number}.`;
+        }
+      }
+    } else if (role === 'cupidon') {
+      const cupidonBot = botPlayers.find(p => p.role === 'cupidon');
+      if (cupidonBot && (!gameState.lovers || gameState.lovers.length === 0)) {
+        if (allAlive.length >= 2) {
+          const shuffled = [...allAlive];
+          shuffleArray(shuffled);
+          const lovers = [shuffled[0].id, shuffled[1].id];
+          await supabaseClient.from('game_state').update({ lovers }).eq('id', 1);
+          if (statusText) statusText.textContent = "Cupidon bot a lié les amoureux.";
+        }
+      }
+    } else if (role === 'garde') {
+      const gardeBot = botPlayers.find(p => p.role === 'garde');
+      if (gardeBot) {
+        const target = allAlive[Math.floor(Math.random() * allAlive.length)];
+        await supabaseClient.from('game_state').update({ current_night_saves: [target.number] }).eq('id', 1);
+        await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', gardeBot.id);
+        if (statusText) statusText.textContent = `Garde bot a protégé N° ${target.number}.`;
+      }
+    } else if (role === 'voyante') {
+      const voyanteBot = botPlayers.find(p => p.role === 'voyante');
+      if (voyanteBot && !voyanteBot.vote_target) {
+        const targets = allAlive.filter(p => p.id !== voyanteBot.id);
+        if (targets.length > 0) {
+          const target = targets[Math.floor(Math.random() * targets.length)];
+          await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', voyanteBot.id);
+          if (statusText) statusText.textContent = `Voyante bot a inspecté N° ${target.number}.`;
+        }
+      }
+    } else if (role === 'sorciere') {
+      const sorciereBot = botPlayers.find(p => p.role === 'sorciere');
+      if (sorciereBot) {
+        const kills = gameState.current_night_kills || [];
+        let healUsed = gameState.witch_heal_used;
+        let poisonUsed = gameState.witch_poison_used;
+        
+        let newKills = [...kills];
+        let newPoisons = [];
+        
+        if (kills.length > 0 && !healUsed && Math.random() < 0.5) {
+          newKills = [];
+          healUsed = true;
+        }
+        
+        if (!poisonUsed && Math.random() < 0.3) {
+          const targets = allAlive.filter(p => p.id !== sorciereBot.id);
+          if (targets.length > 0) {
+            const target = targets[Math.floor(Math.random() * targets.length)];
+            newPoisons = [target.number];
+            poisonUsed = true;
+          }
+        }
+        
+        await supabaseClient.from('game_state').update({
+          current_night_kills: newKills,
+          current_night_poisons: newPoisons,
+          witch_heal_used: healUsed,
+          witch_poison_used: poisonUsed
+        }).eq('id', 1);
+        
+        await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', sorciereBot.id);
+        if (statusText) statusText.textContent = "Sorcière bot a pris ses décisions.";
+      }
+    } else if (role === 'fluteur') {
+      const fluteurBot = botPlayers.find(p => p.role === 'fluteur');
+      if (fluteurBot) {
+        const targets = allAlive.filter(p => p.id !== fluteurBot.id && !p.charmed);
+        if (targets.length >= 2) {
+          const shuffled = [...targets];
+          shuffleArray(shuffled);
+          const charmedIds = [shuffled[0].id, shuffled[1].id];
+          await supabaseClient.from('players').update({ charmed: true }).in('id', charmedIds);
+          await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', fluteurBot.id);
+          if (statusText) statusText.textContent = `Flûteur bot a charmé N° ${shuffled[0].number} et N° ${shuffled[1].number}.`;
+        } else if (targets.length > 0) {
+          await supabaseClient.from('players').update({ charmed: true }).eq('id', targets[0].id);
+          await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', fluteurBot.id);
+          if (statusText) statusText.textContent = `Flûteur bot a charmé N° ${targets[0].number}.`;
+        } else {
+          await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', fluteurBot.id);
+        }
+      }
+    }
+  } else if (gameState.phase === 'day_vote') {
+    const votes = botPlayers.map(bot => {
+      const targets = allAlive.filter(p => p.id !== bot.id);
+      if (targets.length > 0) {
+        const target = targets[Math.floor(Math.random() * targets.length)];
+        return supabaseClient.from('players').update({ vote_target: target.number }).eq('id', bot.id);
+      }
+      return Promise.resolve();
+    });
+    await Promise.all(votes);
+    if (statusText) statusText.textContent = "Tous les bots ont voté au hasard.";
+  }
 }
 
 // Lancer la phase de Nuit
@@ -1807,20 +2575,16 @@ async function advanceToNight() {
     }
   }
 
-  // Nettoyer les vote_target et états temporaires
-  const cleanUpdates = players.map(p => {
-    return supabaseClient.from('players').update({ vote_target: null }).eq('id', p.id);
-  });
-  await Promise.all(cleanUpdates);
-
-  // Mettre à jour l'état général
+  // Mettre à jour la phase à night et vider les variables de nuit
   await supabaseClient.from('game_state').update({
     phase: 'night',
-    night_phase: startRole,
     current_night_kills: [],
     current_night_saves: [],
     current_night_poisons: []
   }).eq('id', 1);
+
+  // Appeler le helper pour définir la phase de nuit avec les minuteurs et nettoyer les votes
+  await setNightPhase(startRole);
 }
 
 // Calculer le vote de nuit des Loups

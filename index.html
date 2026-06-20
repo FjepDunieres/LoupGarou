@@ -46,7 +46,8 @@
   <div id="gm-view" class="app-container hidden">
     <!-- GM Authentication Login Panel -->
     <div id="gm-login-panel" class="player-screen">
-      <div class="player-card glass">
+      <div class="player-card glass fade-in">
+        <img src="assets/logo.png" alt="Logo" style="width: 80px; height: 80px; object-fit: contain; margin: 0 auto 20px auto; display: block; filter: drop-shadow(0 0 12px rgba(0, 210, 255, 0.45));">
         <h2 class="title-glow" style="margin-bottom: 20px;">🛡️ Connexion Game Master</h2>
         <p style="color: var(--color-muted); margin-bottom: 25px;">Connectez-vous pour administrer la partie avec votre compte Supabase.</p>
         <div class="form-group">
@@ -60,7 +61,15 @@
     <!-- GM Main Controls -->
     <div id="gm-main-panel" class="gm-layout hidden">
       <!-- Left column: Sidebar stats & quick actions -->
-      <div class="gm-sidebar">
+      <div class="gm-sidebar fade-in">
+        <div class="glass" style="padding: 15px; display: flex; align-items: center; gap: 15px; border-color: rgba(0, 210, 255, 0.2);">
+          <img src="assets/logo.png" alt="Logo" style="width: 45px; height: 45px; object-fit: contain; filter: drop-shadow(0 0 8px rgba(0, 210, 255, 0.4));">
+          <div>
+            <h2 class="title-glow" style="font-size: 1.1rem; line-height: 1.2;">ADMINISTRATEUR</h2>
+            <p style="font-size: 0.7rem; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 0;">Loup Garou Géant</p>
+          </div>
+        </div>
+
         <div class="glass" style="padding: 20px;">
           <h3 class="title-glow" style="margin-bottom: 15px;">📊 Statut de la Partie</h3>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
@@ -86,22 +95,104 @@
           </div>
         </div>
 
-        <div class="glass" style="padding: 20px;">
-          <button id="btn-gm-reset" class="btn btn-danger" style="width: 100%;">⚡ Réinitialiser le Jeu</button>
+        <div class="glass" style="padding: 20px; border-color: rgba(0, 245, 212, 0.2);">
+          <h3 class="title-glow" style="margin-bottom: 15px; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;">🤖 Simulateur de Test</h3>
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="sim-bot-count" style="font-size: 0.75rem; margin-bottom: 6px;">Nombre de joueurs virtuels</label>
+            <input type="number" id="sim-bot-count" value="12" min="1" max="100" style="width: 100%; padding: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-glass); border-radius: 8px; color: #fff; font-family: var(--font-main); font-size: 0.9rem; outline: none;">
+          </div>
+          <button id="btn-sim-generate" class="btn btn-primary" style="width: 100%; padding: 10px; margin-bottom: 8px; font-size: 0.85rem; border-radius: 8px;">Générer les Bots</button>
+          
+          <div style="margin: 10px 0; display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="sim-auto-pilot" checked style="width: auto; cursor: pointer; height: 16px;">
+            <label for="sim-auto-pilot" style="font-size: 0.75rem; text-transform: none; color: var(--color-muted); margin-bottom: 0; cursor: pointer; display: inline-block;">Simulation automatique</label>
+          </div>
+          
+          <button id="btn-sim-trigger-actions" class="btn btn-accent" style="width: 100%; padding: 10px; font-size: 0.85rem; border-radius: 8px;" disabled>⚡ Simuler Actions</button>
+          <div id="sim-status-text" style="font-size: 0.75rem; color: var(--color-muted); text-align: center; margin-top: 10px;">Simulation inactive</div>
+        </div>
+
+        <div class="glass" style="padding: 20px; display: flex; flex-direction: column; gap: 10px;">
+          <button id="btn-gm-restart-lobby-sidebar" class="btn btn-primary" style="width: 100%; font-size: 0.85rem;">🔄 Recommencer (Garder Joueurs)</button>
+          <button id="btn-gm-reset" class="btn btn-danger" style="width: 100%; font-size: 0.85rem;">⚡ Vider le Salon (Supprimer)</button>
         </div>
       </div>
 
       <!-- Right column: State manager & workflow -->
-      <div class="gm-main-panel glass">
+      <div class="gm-main-panel glass fade-in">
         <div class="gm-status-header">
           <h2 id="gm-current-phase-title" class="title-glow">Lobby d'inscription</h2>
           <span id="gm-phase-badge" class="phase-tag lobby">Lobby</span>
         </div>
 
         <!-- Section: Lobby Setup -->
-        <div id="gm-section-lobby" class="gm-section">
+        <div id="gm-section-lobby" class="gm-section fade-in">
           <p style="margin-bottom: 20px; color: var(--color-muted);">Attendez que tous les joueurs scannent le QR code et rejoignent le lobby. Une fois que tout le monde est connecté, cliquez sur le bouton ci-dessous pour distribuer les rôles aléatoirement.</p>
           
+          <!-- GM Lobby Settings Panel -->
+          <div class="glass" style="padding: 20px; margin-bottom: 25px; border-color: rgba(255, 255, 255, 0.1); text-align: left;">
+            <h3 class="title-glow" style="font-size: 1.1rem; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">⚙️ Configuration de la Partie</h3>
+            
+            <!-- Wolves count selector -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+              <div>
+                <strong style="font-size: 0.9rem;">Loups-Garous</strong>
+                <div style="font-size: 0.75rem; color: var(--color-muted);">Nombre de loups dans la meute</div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <button type="button" id="btn-config-wolves-minus" class="btn btn-secondary btn-sm" style="padding: 5px 12px; font-size: 0.9rem; border-radius: 6px;">-</button>
+                <span id="config-wolves-val" style="font-size: 1.2rem; font-weight: bold; width: 20px; text-align: center;">2</span>
+                <button type="button" id="btn-config-wolves-plus" class="btn btn-secondary btn-sm" style="padding: 5px 12px; font-size: 0.9rem; border-radius: 6px;">+</button>
+              </div>
+            </div>
+
+            <!-- Night turn duration -->
+            <div style="margin-bottom: 20px;">
+              <label for="config-night-timer" style="display: block; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--color-muted); margin-bottom: 6px;">Durée limite des tours de nuit</label>
+              <select id="config-night-timer" style="width: 100%; padding: 10px; border-radius: 8px;">
+                <option value="0">Désactivé (Avancement manuel)</option>
+                <option value="15">15 secondes</option>
+                <option value="20" selected>20 secondes</option>
+                <option value="30">30 secondes</option>
+                <option value="45">45 secondes</option>
+              </select>
+            </div>
+
+            <!-- Special roles toggles -->
+            <div>
+              <div style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; color: var(--color-muted); margin-bottom: 10px;">Sélection des rôles spéciaux</div>
+              <div id="config-roles-list" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85rem;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-voyante" checked style="width: auto; height: auto;"> Voyante
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-sorciere" checked style="width: auto; height: auto;"> Sorcière
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-chasseur" checked style="width: auto; height: auto;"> Chasseur
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-cupidon" checked style="width: auto; height: auto;"> Cupidon
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-garde" checked style="width: auto; height: auto;"> Garde
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-fluteur" checked style="width: auto; height: auto;"> Flûteur
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-ange" checked style="width: auto; height: auto;"> Ange
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-idiot" checked style="width: auto; height: auto;"> Idiot
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-role-ancien" checked style="width: auto; height: auto;"> Ancien
+                </label>
+              </div>
+            </div>
+          </div>
+
           <div class="glass" style="padding: 25px; text-align: center; margin-bottom: 25px;">
             <div style="font-size: 1.2rem; margin-bottom: 10px;">Répartition estimée pour <span id="gm-est-count" style="font-weight: bold;">0</span> joueurs :</div>
             <div id="gm-role-distribution-preview" style="font-size: 0.9rem; color: var(--color-muted); display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;">
@@ -113,7 +204,7 @@
         </div>
 
         <!-- Section: Night phase control -->
-        <div id="gm-section-night" class="gm-section hidden">
+        <div id="gm-section-night" class="gm-section fade-in hidden">
           <div class="lobby-header-flex">
             <h3>🌙 Déroulement de la Nuit</h3>
             <button id="btn-gm-next-night-phase" class="btn btn-accent">Passer au tour suivant ➔</button>
@@ -178,7 +269,7 @@
         </div>
 
         <!-- Section: Day Announcement -->
-        <div id="gm-section-day-announcement" class="gm-section hidden">
+        <div id="gm-section-day-announcement" class="gm-section fade-in hidden">
           <h3>☀️ Annonces du Matin</h3>
           <div class="glass" style="padding: 20px; margin: 20px 0; border-color: rgba(255,190,11,0.2);">
             <div style="font-size: 0.8rem; text-transform: uppercase; color: var(--color-muted); margin-bottom: 5px;">Morts constatés :</div>
@@ -188,7 +279,7 @@
         </div>
 
         <!-- Section: Day Discussion -->
-        <div id="gm-section-day-discussion" class="gm-section hidden">
+        <div id="gm-section-day-discussion" class="gm-section fade-in hidden">
           <h3>💬 Débat Public</h3>
           <p style="color: var(--color-muted); margin-bottom: 20px;">Laissez le village débattre. Vous pouvez lancer un minuteur pour forcer le timing de jeu.</p>
           
@@ -206,7 +297,7 @@
         </div>
 
         <!-- Section: Day Vote Control -->
-        <div id="gm-section-day-vote" class="gm-section hidden">
+        <div id="gm-section-day-vote" class="gm-section fade-in hidden">
           <h3>🗳️ Vote de l'Assemblée</h3>
           <p style="color: var(--color-muted); margin-bottom: 20px;">Les joueurs votent maintenant en temps réel sur leur téléphone. Le tableau affiche l'évolution en direct.</p>
           
@@ -229,13 +320,14 @@
         </div>
 
         <!-- Section: Game Over -->
-        <div id="gm-section-game-over" class="gm-section hidden">
+        <div id="gm-section-game-over" class="gm-section fade-in hidden">
           <h3 style="color: var(--neon-green); font-size: 2rem; margin-bottom: 10px;">🏆 Partie Terminée !</h3>
           <div class="glass" style="padding: 25px; text-align: center; margin-bottom: 25px;">
             <div style="font-size: 0.9rem; text-transform: uppercase; color: var(--color-muted);">Vainqueurs :</div>
             <div id="gm-winner-announcement" style="font-size: 2.2rem; font-weight: 800; color: var(--neon-gold); text-shadow: var(--shadow-neon-gold);">VILLAGEOIS</div>
           </div>
-          <button id="btn-gm-restart-lobby" class="btn btn-primary" style="width: 100%;">🔄 Revenir au Lobby pour une Nouvelle Partie</button>
+          <button id="btn-gm-restart-lobby" class="btn btn-primary" style="width: 100%; margin-bottom: 10px;">🔄 Revenir au Lobby (Garder Joueurs)</button>
+          <button id="btn-gm-clear-players" class="btn btn-danger" style="width: 100%;">⚡ Vider le Salon et Supprimer les Joueurs</button>
         </div>
 
       </div>
@@ -249,9 +341,12 @@
     <div class="tableau-layout">
       <!-- Top Header -->
       <div class="tableau-header glass">
-        <div>
-          <h1 class="title-glow" style="font-size: 2.5rem;">🐺 LOUP GAROU GÉANT</h1>
-          <p id="tab-sub-phase" style="color: var(--color-muted); font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.05em;">LOBBY D'INSCRIPTION - SCANNEZ LE QR CODE</p>
+        <div style="display: flex; align-items: center; gap: 20px;">
+          <img src="assets/logo.png" alt="Logo" style="width: 70px; height: 70px; object-fit: contain; filter: drop-shadow(0 0 15px rgba(0, 210, 255, 0.4));">
+          <div>
+            <h1 class="title-glow" style="font-size: 2.5rem; line-height: 1.1;">LOUP GAROU GÉANT</h1>
+            <p id="tab-sub-phase" style="color: var(--color-muted); font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 5px;">LOBBY D'INSCRIPTION - SCANNEZ LE QR CODE</p>
+          </div>
         </div>
         <div id="tab-timer-box" class="tableau-timer hidden">03:00</div>
       </div>
@@ -308,8 +403,9 @@
     
     <!-- Player Step 1: Registration Form -->
     <div id="player-step-join" class="player-screen hidden">
-      <div class="player-card glass">
-        <h1 class="title-glow" style="font-size: 2.2rem; margin-bottom: 10px;">🐺 Loup Garou</h1>
+      <div class="player-card glass fade-in">
+        <img src="assets/logo.png" alt="Logo" style="width: 80px; height: 80px; object-fit: contain; margin: 0 auto 20px auto; display: block; filter: drop-shadow(0 0 12px rgba(0, 210, 255, 0.45));">
+        <h1 class="title-glow" style="font-size: 2.2rem; margin-bottom: 10px;">Loup Garou</h1>
         <p style="color: var(--color-muted); margin-bottom: 25px;">Saisissez votre prénom ou pseudo pour entrer dans la partie géante.</p>
         
         <div class="form-group">
@@ -323,7 +419,8 @@
 
     <!-- Player Step 2: Lobby (Waiting for start) -->
     <div id="player-step-lobby" class="player-screen hidden">
-      <div class="player-card glass">
+      <div class="player-card glass fade-in">
+        <img src="assets/logo.png" alt="Logo" style="width: 70px; height: 70px; object-fit: contain; margin: 0 auto 15px auto; display: block; filter: drop-shadow(0 0 10px rgba(0, 210, 255, 0.4));">
         <h2 style="font-size: 1.4rem; color: var(--color-muted);">Bienvenue au Village !</h2>
         <div id="player-lobby-name" style="font-size: 1.8rem; font-weight: 800; margin-top: 5px;">Joueur</div>
         
@@ -348,12 +445,43 @@
       </div>
 
       <!-- Sub-Screen: Ghost (If Dead) -->
-      <div id="player-sub-dead" class="player-card glass ghost-screen hidden">
-        <div class="night-icon">👻</div>
-        <h2 class="title-glow" style="color: var(--neon-green);">Vous êtes éliminé</h2>
-        <p style="color: var(--color-muted); margin: 15px 0 25px 0;">Les fantômes ne parlent pas et ne votent pas. Vous pouvez toujours regarder le grand tableau pour voir la suite des événements !</p>
-        <div id="player-dead-role-reveal" style="font-size: 0.9rem; color: var(--color-muted);">
-          Vous étiez : <span id="player-dead-role-name" style="font-weight: bold;">Rôle</span>
+      <div id="player-sub-dead" class="player-card glass ghost-screen hidden" style="padding: 20px;">
+        <div class="night-icon" style="margin-bottom: 10px;">👻</div>
+        <h2 class="title-glow" style="color: var(--neon-green); font-size: 1.8rem;">Vous êtes éliminé</h2>
+        <div id="player-dead-role-reveal" style="font-size: 0.85rem; color: var(--color-muted); margin-bottom: 15px;">
+          Vous étiez : <span id="player-dead-role-name" style="font-weight: bold; color: var(--neon-red);">Rôle</span>
+        </div>
+
+        <!-- Spectator Dashboard -->
+        <div class="spectator-panel glass" style="margin-top: 15px; padding: 15px; text-align: left;">
+          <h3 style="color: var(--neon-green); margin-bottom: 10px; font-size: 0.9rem; border-bottom: 1px solid rgba(0, 245, 212, 0.2); padding-bottom: 6px; display: flex; align-items: center; gap: 6px;">👁️ Mode Spectre</h3>
+          
+          <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--color-muted); margin-bottom: 12px;">
+            <div>Phase: <span id="spec-phase" style="color: var(--neon-blue); font-weight: bold; text-transform: uppercase;">Lobby</span></div>
+            <div>Vivants: <span id="spec-alive" style="color: var(--neon-green); font-weight: bold;">0</span></div>
+          </div>
+
+          <!-- Live Discussion Timer -->
+          <div id="spec-timer-container" class="glass hidden" style="padding: 10px; text-align: center; margin-bottom: 12px; border-color: rgba(255, 190, 11, 0.2);">
+            <div style="font-size: 0.7rem; color: var(--color-muted); text-transform: uppercase;">Temps de discussion :</div>
+            <div id="spec-timer" style="font-size: 1.8rem; font-weight: bold; color: var(--neon-gold);">00:00</div>
+          </div>
+
+          <!-- Live Voting Feed -->
+          <div id="spec-votes-container" class="glass hidden" style="padding: 10px; margin-bottom: 12px; border-color: rgba(255, 51, 102, 0.2);">
+            <div style="font-size: 0.7rem; color: var(--color-muted); text-transform: uppercase; margin-bottom: 6px;">Votes de l'assemblée :</div>
+            <div id="spec-votes-list" style="font-size: 0.8rem; display: flex; flex-direction: column; gap: 4px; max-height: 100px; overflow-y: auto;">
+              <!-- live votes -->
+            </div>
+          </div>
+
+          <!-- Players Roster -->
+          <div style="font-size: 0.8rem;">
+            <div style="color: var(--color-muted); margin-bottom: 6px; text-transform: uppercase; font-size: 0.7rem;">Mémorial du Village (Rôles révélés) :</div>
+            <div id="spec-players-list" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;">
+              <!-- Players list -->
+            </div>
+          </div>
         </div>
       </div>
 
@@ -361,7 +489,7 @@
       <div id="player-sub-alive" style="width:100%;">
         
         <!-- Phase: Role Distribution (Card Reveal) -->
-        <div id="player-phase-distribute" class="hidden">
+        <div id="player-phase-distribute" class="fade-in hidden">
           <h2 class="title-glow" style="text-align: center; margin-bottom: 10px;">Découvrez votre rôle</h2>
           <p style="text-align: center; color: var(--color-muted); font-size: 0.9rem;">Appuyez sur la carte pour la retourner.</p>
           
@@ -384,7 +512,7 @@
         </div>
 
         <!-- Phase: Night Phase (General Sleep) -->
-        <div id="player-phase-night-sleep" class="night-overlay hidden">
+        <div id="player-phase-night-sleep" class="night-overlay fade-in hidden">
           <div class="night-icon">🌙</div>
           <h2 style="color: var(--neon-purple); text-shadow: var(--shadow-neon-purple); margin-bottom: 10px;">Le village s'endort</h2>
           <p style="color: var(--color-muted);">Fermez les yeux... Les créatures de la nuit s'éveillent les unes après les autres. Attendez votre tour.</p>
@@ -397,7 +525,11 @@
         </div>
 
         <!-- Phase: Night Action (Interactive Player Turn) -->
-        <div id="player-phase-night-action" class="glass active-action-panel hidden">
+        <div id="player-phase-night-action" class="glass active-action-panel fade-in hidden">
+          <div id="player-night-timer-container" class="hidden" style="margin-bottom: 15px; text-align: center;">
+            <div style="font-size: 0.75rem; color: var(--color-muted); text-transform: uppercase;">Temps restant pour agir :</div>
+            <div id="player-night-timer" style="font-size: 1.8rem; font-weight: bold; color: var(--neon-purple); text-shadow: var(--shadow-neon-purple);">--s</div>
+          </div>
           <h3 style="color: var(--neon-purple); margin-bottom: 5px; text-align: center;">⚡ C'est votre Tour !</h3>
           <p id="player-action-instructions" style="color: var(--color-muted); text-align: center; font-size: 0.85rem; margin-bottom: 20px;">Instructions d'action du rôle</p>
           
@@ -482,7 +614,7 @@
         </div>
 
         <!-- Phase: Day Wakeup / Announcement -->
-        <div id="player-phase-day-announcement" class="player-card glass hidden">
+        <div id="player-phase-day-announcement" class="player-card glass fade-in hidden">
           <div class="night-icon">☀️</div>
           <h2 class="title-glow">Le village se réveille</h2>
           <div class="glass" style="padding: 20px; margin: 25px 0; border-color: rgba(255,190,11,0.2);">
@@ -493,7 +625,7 @@
         </div>
 
         <!-- Phase: Day Discussion -->
-        <div id="player-phase-day-discussion" class="player-card glass hidden">
+        <div id="player-phase-day-discussion" class="player-card glass fade-in hidden">
           <h2 class="title-glow">💬 Débat Public</h2>
           <p style="color: var(--color-muted); margin-bottom: 20px;">Discutez ensemble dans la pièce. Repérez les menteurs et protégez vos alliés.</p>
           <div id="player-discussion-timer" style="font-size: 3.5rem; font-weight: 800; color: var(--neon-gold); font-variant-numeric: tabular-nums;">03:00</div>
@@ -501,7 +633,7 @@
         </div>
 
         <!-- Phase: Day Vote -->
-        <div id="player-phase-day-vote" class="glass active-action-panel hidden">
+        <div id="player-phase-day-vote" class="glass active-action-panel fade-in hidden">
           <h3 style="color: var(--neon-gold); margin-bottom: 5px; text-align: center;">🗳️ Vote de l'Assemblée</h3>
           <p style="color: var(--color-muted); text-align: center; font-size: 0.85rem; margin-bottom: 20px;">Sélectionnez le joueur que vous suspectez d'être un Loup-Garou.</p>
           
@@ -515,7 +647,7 @@
         </div>
 
         <!-- Phase: Game Over -->
-        <div id="player-phase-game-over" class="player-card glass hidden">
+        <div id="player-phase-game-over" class="player-card glass fade-in hidden">
           <h2 style="color: var(--neon-gold); font-size: 2rem; margin-bottom: 10px;">🏆 Victoire !</h2>
           <div class="glass" style="padding: 20px; margin: 20px 0; border-color: var(--neon-gold);">
             <div id="player-winners-name" style="font-size: 2.2rem; font-weight: 800; color: var(--neon-gold); text-shadow: var(--shadow-neon-gold);">VILLAGEOIS</div>
@@ -523,6 +655,12 @@
           <p style="color: var(--color-muted);">Le Game Master va relancer un salon dans un instant.</p>
         </div>
 
+      </div>
+      
+      <!-- Discret filigrane footer -->
+      <div style="text-align: center; font-size: 0.75rem; color: rgba(255,255,255,0.15); margin-top: 30px; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 8px; pointer-events: none; user-select: none;">
+        <img src="assets/logo.png" alt="Logo mini" style="width: 16px; height: 16px; object-fit: contain; opacity: 0.15;">
+        <span>Loup Garou Géant © 2026</span>
       </div>
     </div>
   </div>
