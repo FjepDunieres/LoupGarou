@@ -451,6 +451,42 @@
         <!-- Rendered in JS, 100 players grid -->
       </div>
 
+      <!-- Debrief Display (Visible only at the end of the game) -->
+      <div id="tab-debrief-container" class="hidden" style="margin-top: 20px; display: flex; flex-direction: column; gap: 20px; align-items: center; width: 100%;">
+        <!-- Trophies section -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; width: 100%; max-width: 1000px;">
+          <!-- Trophée 1: Survivant -->
+          <div class="glass" style="padding: 20px; border-color: rgba(0, 245, 212, 0.3); text-align: center;">
+            <div style="font-size: 2.5rem; margin-bottom: 10px;">🍀</div>
+            <h3 style="color: var(--neon-blue); font-size: 1.1rem; margin-bottom: 5px;">LE SURVIVANT ULTIME</h3>
+            <div id="tab-trophy-survivor" style="font-size: 1.6rem; font-weight: 800; text-shadow: 0 0 10px rgba(0,210,255,0.4);">--</div>
+            <p style="font-size: 0.8rem; color: var(--color-muted); margin-top: 5px;">Le simple villageois resté debout le plus longtemps.</p>
+          </div>
+          <!-- Trophée 2: Cible Facile -->
+          <div class="glass" style="padding: 20px; border-color: rgba(255, 0, 85, 0.3); text-align: center;">
+            <div style="font-size: 2.5rem; margin-bottom: 10px;">🎯</div>
+            <h3 style="color: var(--neon-red); font-size: 1.1rem; margin-bottom: 5px;">LA CIBLE FACILE</h3>
+            <div id="tab-trophy-target" style="font-size: 1.6rem; font-weight: 800; text-shadow: 0 0 10px rgba(255,0,85,0.4);">--</div>
+            <p style="font-size: 0.8rem; color: var(--color-muted); margin-top: 5px;">Le joueur le plus souvent ciblé durant la partie.</p>
+          </div>
+          <!-- Trophée 3: Le Sniper -->
+          <div class="glass" style="padding: 20px; border-color: rgba(255, 215, 0, 0.3); text-align: center;">
+            <div style="font-size: 2.5rem; margin-bottom: 10px;">🐺</div>
+            <h3 style="color: var(--neon-gold); font-size: 1.1rem; margin-bottom: 5px;">LE SNIPER</h3>
+            <div id="tab-trophy-sniper" style="font-size: 1.6rem; font-weight: 800; text-shadow: 0 0 10px rgba(255,215,0,0.4);">--</div>
+            <p style="font-size: 0.8rem; color: var(--color-muted); margin-top: 5px;">Le loup-garou le plus implacable.</p>
+          </div>
+        </div>
+
+        <!-- History Timeline -->
+        <div class="glass" style="padding: 25px; width: 100%; max-width: 1000px; text-align: left; display: flex; flex-direction: column; height: 350px;">
+          <h3 class="title-glow" style="margin-bottom: 15px; font-size: 1.25rem; color: #fff;">📜 CHRONOLOGIE DE LA PARTIE</h3>
+          <div id="tab-history-list" style="overflow-y: auto; flex-grow: 1; display: flex; flex-direction: column; gap: 8px; padding-right: 10px;">
+            <!-- Events rendered here -->
+          </div>
+        </div>
+      </div>
+
       <!-- Bottom statistics/legend -->
       <div class="glass" style="padding: 15px 30px; display: flex; justify-content: space-between; font-size: 0.9rem;">
         <div>Joueurs : <span id="tab-stat-total" style="font-weight: 800; color: var(--neon-blue);">0</span></div>

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS game_state (
     current_night_poisons JSONB DEFAULT '[]'::jsonb, -- Numéros empoisonnés par la sorcière
     winners TEXT DEFAULT '',
     is_auto_mode BOOLEAN DEFAULT FALSE,
+    game_history JSONB DEFAULT '[]'::jsonb,
     last_update TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT one_row CHECK (id = 1) -- Force l'existence d'une seule et unique ligne
 );
@@ -112,6 +113,7 @@ BEGIN
         current_night_saves = '[]'::jsonb,
         current_night_poisons = '[]'::jsonb,
         winners = '',
+        game_history = '[]'::jsonb,
         last_update = NOW()
     WHERE id = 1;
 END;

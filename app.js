@@ -747,6 +747,14 @@ document.getElementById('btn-submit-cupidon').addEventListener('click', async ()
   if (selectedLoverTargets.length === 2) {
     if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
     document.getElementById('btn-submit-cupidon').disabled = true;
+    
+    // Enregistrer l'événement de Cupidon dans l'historique
+    const lover1 = players.find(p => p.id === selectedLoverTargets[0]);
+    const lover2 = players.find(p => p.id === selectedLoverTargets[1]);
+    if (lover1 && lover2) {
+      await addHistoryEvent('night', `💘 Cupidon a lié ${lover1.name} (N° ${lover1.number}) et ${lover2.name} (N° ${lover2.number}) par les liens sacrés de l'amour.`);
+    }
+
     const { error } = await supabaseClient
       .from('game_state')
       .update({ lovers: selectedLoverTargets })
@@ -763,8 +771,11 @@ document.getElementById('btn-submit-garde').addEventListener('click', async () =
   if (selectedGardeTarget) {
     if (navigator.vibrate) navigator.vibrate(40);
     document.getElementById('btn-submit-garde').disabled = true;
-    const { data: targetPlayer } = await supabaseClient.from('players').select('number').eq('id', selectedGardeTarget).single();
+    const { data: targetPlayer } = await supabaseClient.from('players').select('name, number').eq('id', selectedGardeTarget).single();
     if (targetPlayer) {
+      // Log de protection
+      await addHistoryEvent('night', `🛡️ Le Garde a protégé ${targetPlayer.name} (N° ${targetPlayer.number}).`);
+
       // Sauvegarder dans la liste des protégés du tour
       const saves = [targetPlayer.number];
       const { error } = await supabaseClient
@@ -788,11 +799,14 @@ document.getElementById('btn-submit-voyante').addEventListener('click', async ()
     // Obtenir le rôle du joueur ciblé
     const { data: targetPlayer } = await supabaseClient
       .from('players')
-      .select('name, role')
+      .select('name, role, number')
       .eq('id', selectedVoyanteTarget)
       .single();
 
     if (targetPlayer) {
+      // Log de Voyante
+      await addHistoryEvent('night', `🔮 La Voyante a inspecté le rôle de ${targetPlayer.name} (N° ${targetPlayer.number}).`);
+
       const revealDiv = document.getElementById('voyante-reveal-result');
       document.getElementById('voyante-inspected-name').textContent = targetPlayer.name;
       
@@ -810,6 +824,11 @@ document.getElementById('btn-submit-fluteur').addEventListener('click', async ()
   if (selectedFluteurTargets.length === 2) {
     if (navigator.vibrate) navigator.vibrate(40);
     document.getElementById('btn-submit-fluteur').disabled = true;
+
+    // Log de Flûteur
+    const targetPlayers = players.filter(p => selectedFluteurTargets.includes(p.id));
+    const names = targetPlayers.map(p => `${p.name} (N° ${p.number})`).join(' et ');
+    await addHistoryEvent('night', `🎶 Le Flûteur a charmé ${names}.`);
 
     // Mettre à jour les deux joueurs comme charmés dans la BDD
     const { error } = await supabaseClient
@@ -866,6 +885,9 @@ function setupSorciereInterface(alivePlayers) {
   // Action: Utiliser potion de vie
   btnHeal.onclick = async () => {
     btnHeal.disabled = true;
+    // Log de potion de vie
+    await addHistoryEvent('night', `🧪 La Sorcière a utilisé sa potion de vie pour ressusciter la victime des Loups-Garous.`);
+
     // Supprimer la victime de la liste des morts de la nuit
     await supabaseClient.from('game_state').update({
       current_night_kills: [],
@@ -881,6 +903,9 @@ function setupSorciereInterface(alivePlayers) {
       btnPoison.disabled = true;
       const target = alivePlayers.find(p => p.id === selectedPoisonTarget);
       if (target) {
+        // Log de potion de mort
+        await addHistoryEvent('night', `🧪 La Sorcière a empoisonné ${target.name} (N° ${target.number}).`);
+
         // Ajouter à la liste des empoisonnés
         const poisons = [target.number];
         await supabaseClient.from('game_state').update({
@@ -1081,6 +1106,10 @@ async function setupMayorTiebreakPanel() {
     submitBtn.disabled = true;
     const chosenPlayers = selectedMayorTiebreakTargets.map(id => alivePlayers.find(p => p.id === id)).filter(p => p);
     
+    // Log d'arbitrage du maire dans l'historique
+    const names = chosenPlayers.map(p => `${p.name} (N° ${p.number})`).join(', ');
+    await addHistoryEvent('death', `⚖️ ARBITRAGE DU MAIRE : Le maire a tranché l'égalité et a éliminé ${names}.`);
+
     // Éliminer les joueurs choisis
     const updates = chosenPlayers.map(p => {
       return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
@@ -1188,6 +1217,146 @@ function startTabLobbyTimer(duration, startedAt) {
   tabLobbyTimerInterval = setInterval(update, 1000);
 }
 
+// --- LOGIQUE D'HISTORIQUE DE JEU ---
+let localHistory = [];
+async function addHistoryEvent(type, text) {
+  if (gameState && gameState.game_history) {
+    localHistory = Array.isArray(gameState.game_history) ? gameState.game_history : [];
+  } else {
+    localHistory = [];
+  }
+
+  const newEvent = {
+    id: Date.now() + Math.random().toString(36).substr(2, 4),
+    type: type, // 'setup', 'night', 'day', 'death', 'vote', 'info'
+    text: text,
+    time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  };
+
+  localHistory.push(newEvent);
+  console.log(`[Game-History] [${type.toUpperCase()}] ${text}`);
+
+  const { error } = await supabaseClient.from('game_state').update({
+    game_history: localHistory
+  }).eq('id', 1);
+
+  if (error) {
+    console.error("Erreur d'écriture de l'historique:", error);
+  }
+}
+
+// --- TEXTE DE VICTOIRE POUR L'HISTORIQUE ---
+function getVictoryText(winners) {
+  if (winners === 'loups') {
+    return "🏆 PARTIE TERMINÉE : Victoire de la meute des Loups-Garous ! 🐺";
+  } else if (winners === 'villageois') {
+    return "🏆 PARTIE TERMINÉE : Victoire du village ! Les loups ont été éliminés. 🏡";
+  } else if (winners === 'fluteur') {
+    return "🏆 PARTIE TERMINÉE : Victoire du Flûteur ! Tout le village est sous son charme. 🎶";
+  } else if (winners === 'amoureux') {
+    return "🏆 PARTIE TERMINÉE : Victoire des Amoureux ! L'amour a triomphé. 💖";
+  }
+  return `🏆 PARTIE TERMINÉE : Victoire de la faction ${winners}.`;
+}
+
+// --- CALCUL DES STATISTIQUES DE DEBRIEFING ---
+function calculateEndGameStats(allPlayers, history) {
+  const stats = {
+    survivor: "Aucun",
+    target: "Aucun",
+    sniper: "Aucun"
+  };
+
+  if (!allPlayers || allPlayers.length === 0) return stats;
+
+  // 1. Le Survivant Ultime (Simple Villageois resté en vie le plus longtemps)
+  const simpleVillageois = allPlayers.filter(p => p.role === 'villageois');
+  if (simpleVillageois.length > 0) {
+    const aliveVillageois = simpleVillageois.filter(p => p.status === 'alive');
+    if (aliveVillageois.length > 0) {
+      stats.survivor = aliveVillageois[Math.floor(Math.random() * aliveVillageois.length)].name;
+    } else {
+      // Rechercher dans l'historique le dernier Simple Villageois à être mort
+      let lastDeadName = null;
+      if (Array.isArray(history)) {
+        for (let i = history.length - 1; i >= 0; i--) {
+          const event = history[i];
+          if (event.type === 'death') {
+            const found = simpleVillageois.find(v => event.text.includes(v.name));
+            if (found) {
+              lastDeadName = found.name;
+              break;
+            }
+          }
+        }
+      }
+      stats.survivor = lastDeadName || simpleVillageois[Math.floor(Math.random() * simpleVillageois.length)].name;
+    }
+  } else {
+    // Si pas de simple villageois configuré, repli sur un rôle du village en vie
+    const aliveVillage = allPlayers.filter(p => p.status === 'alive' && p.role !== 'loup' && p.role !== 'fluteur');
+    if (aliveVillage.length > 0) {
+      stats.survivor = aliveVillage[Math.floor(Math.random() * aliveVillage.length)].name;
+    }
+  }
+
+  // 2. La Cible Facile (mentionné le plus de fois dans les attaques ou votes dans l'historique)
+  // On recherche par (N° X) pour éviter les collisions de prénoms (ex: Max et Maxime)
+  const nameMentions = {};
+  allPlayers.forEach(p => {
+    nameMentions[p.name] = 0;
+  });
+
+  if (Array.isArray(history)) {
+    history.forEach(event => {
+      allPlayers.forEach(p => {
+        const targetStr = `(N° ${p.number})`;
+        if (event.text.includes(targetStr)) {
+          if (event.text.includes("attaqué") || event.text.includes("protégé") || event.text.includes("inspecté") || event.text.includes("éliminé") || event.text.includes("abattre")) {
+            nameMentions[p.name]++;
+          }
+        }
+      });
+    });
+  }
+
+  const sortedMentions = Object.entries(nameMentions).sort((a, b) => b[1] - a[1]);
+  if (sortedMentions.length > 0 && sortedMentions[0][1] > 0) {
+    stats.target = `${sortedMentions[0][0]} (${sortedMentions[0][1]} fois ciblé)`;
+  } else {
+    stats.target = "Aucun joueur ciblé";
+  }
+
+  // 3. Le Sniper (Loup-Garou le plus efficace / resté debout le plus longtemps)
+  const wolves = allPlayers.filter(p => p.role === 'loup');
+  if (wolves.length > 0) {
+    const aliveWolves = wolves.filter(p => p.status === 'alive');
+    if (aliveWolves.length > 0) {
+      stats.sniper = aliveWolves[Math.floor(Math.random() * aliveWolves.length)].name;
+    } else {
+      // Trouver le dernier loup mort dans l'historique
+      let lastDeadWolfName = null;
+      if (Array.isArray(history)) {
+        for (let i = history.length - 1; i >= 0; i--) {
+          const event = history[i];
+          if (event.type === 'death') {
+            const found = wolves.find(w => event.text.includes(w.name));
+            if (found) {
+              lastDeadWolfName = found.name;
+              break;
+            }
+          }
+        }
+      }
+      stats.sniper = lastDeadWolfName || wolves[Math.floor(Math.random() * wolves.length)].name;
+    }
+  } else {
+    stats.sniper = "Aucun loup dans la partie";
+  }
+
+  return stats;
+}
+
 // --- VOTE FINAL DU CHASSEUR ---
 async function showChasseurDeathPanel() {
   document.getElementById('player-sub-alive').classList.add('hidden');
@@ -1225,6 +1394,9 @@ async function showChasseurDeathPanel() {
       document.getElementById('btn-chasseur-shoot').disabled = true;
       const target = alivePlayers.find(p => p.id === targetId);
       if (target) {
+        // Log de tir du chasseur dans l'historique
+        await addHistoryEvent('death', `🏹 TIR DU CHASSEUR : Le Chasseur ${myPlayer.name} (N° ${myPlayer.number}) a utilisé son dernier souffle pour abattre ${target.name} (N° ${target.number}).`);
+
         // Éliminer directement la cible
         await supabaseClient.from('players').update({ status: 'dead' }).eq('id', target.id);
         // Sauvegarder mon vote_target pour bloquer d'autres tirs
@@ -1502,7 +1674,82 @@ function renderTableau() {
     }
   } else {
     lobbyContainer.classList.add('hidden');
-    mainGrid.classList.remove('hidden');
+    const debriefContainer = document.getElementById('tab-debrief-container');
+    
+    if (gameState.phase === 'game_over') {
+      mainGrid.classList.add('hidden');
+      if (debriefContainer) {
+        debriefContainer.classList.remove('hidden');
+        
+        // Calculer et afficher les distinctions de fin de partie
+        const stats = calculateEndGameStats(players, gameState.game_history);
+        document.getElementById('tab-trophy-survivor').textContent = stats.survivor;
+        document.getElementById('tab-trophy-target').textContent = stats.target;
+        document.getElementById('tab-trophy-sniper').textContent = stats.sniper;
+        
+        // Rendre la chronologie des événements
+        const historyList = document.getElementById('tab-history-list');
+        if (historyList) {
+          historyList.innerHTML = '';
+          const history = Array.isArray(gameState.game_history) ? gameState.game_history : [];
+          if (history.length === 0) {
+            historyList.innerHTML = `<div style="color: var(--color-muted); text-align: center; padding: 20px;">Aucun événement enregistré.</div>`;
+          } else {
+            history.forEach(event => {
+              const item = document.createElement('div');
+              item.style.padding = '10px 15px';
+              item.style.borderRadius = '6px';
+              item.style.marginBottom = '8px';
+              item.style.fontSize = '0.95rem';
+              item.style.display = 'flex';
+              item.style.justifyContent = 'space-between';
+              item.style.alignItems = 'center';
+              
+              // Styliser selon le type
+              let bg = 'rgba(255,255,255,0.03)';
+              let border = '1px solid rgba(255,255,255,0.1)';
+              let color = '#fff';
+              
+              if (event.type === 'setup') {
+                bg = 'rgba(0, 245, 212, 0.05)';
+                border = '1px solid rgba(0, 245, 212, 0.2)';
+                color = 'var(--neon-blue)';
+              } else if (event.type === 'night_start') {
+                bg = 'rgba(157, 78, 221, 0.08)';
+                border = '1px solid rgba(157, 78, 221, 0.3)';
+                color = '#b583ff';
+              } else if (event.type === 'night') {
+                bg = 'rgba(157, 78, 221, 0.03)';
+                border = '1px solid rgba(157, 78, 221, 0.15)';
+              } else if (event.type === 'death') {
+                bg = 'rgba(255, 0, 85, 0.08)';
+                border = '1px solid rgba(255, 0, 85, 0.3)';
+                color = 'var(--neon-red)';
+              } else if (event.type === 'vote') {
+                bg = 'rgba(255, 215, 0, 0.05)';
+                border = '1px solid rgba(255, 215, 0, 0.2)';
+                color = 'var(--neon-gold)';
+              }
+              
+              item.style.backgroundColor = bg;
+              item.style.border = border;
+              item.style.color = color;
+              
+              item.innerHTML = `
+                <span>${event.text}</span>
+                <span style="font-size: 0.8rem; color: var(--color-muted);">${event.time}</span>
+              `;
+              historyList.appendChild(item);
+            });
+            // Défiler automatiquement vers le bas
+            historyList.scrollTop = historyList.scrollHeight;
+          }
+        }
+      }
+    } else {
+      mainGrid.classList.remove('hidden');
+      if (debriefContainer) debriefContainer.classList.add('hidden');
+    }
 
     if (tabLobbyTimerInterval) {
       clearInterval(tabLobbyTimerInterval);
@@ -2332,7 +2579,9 @@ async function advanceNightStep() {
 
   if (nextRole === 'none') {
     await supabaseClient.from('game_state').update({ night_phase: 'none', timer_duration: 0, timer_started_at: null }).eq('id', 1);
-    alert("Fin des phases nocturnes. Vous pouvez réveiller le village.");
+    if (gameState && !gameState.is_auto_mode) {
+      alert("Fin des phases nocturnes. Vous pouvez réveiller le village.");
+    }
   } else {
     await setNightPhase(nextRole);
   }
@@ -2688,8 +2937,10 @@ function setupGMEventListeners() {
     // Gérer l'idiot du village : s'il est voté, il ne meurt pas mais perd sa voix
     if (targetPlayer.role === 'idiot') {
       alert(`${targetPlayer.name} était l'Idiot du Village ! Il survit mais ne pourra plus voter.`);
-      // On le garde en vie mais on peut marquer vote_target à 999 ou similaire pour lui enlever le vote
-      // Pour faire simple, on affiche juste qu'il survit.
+      
+      // Log de l'Idiot du Village
+      await addHistoryEvent('info', `📣 GRÂCE DE L'IDIOT : ${targetPlayer.name} (N° ${targetPlayer.number}) a été désigné par le village, mais c'est l'Idiot du Village ! Il est gracié.`);
+
       await supabaseClient.from('game_state').update({
         phase: 'day_announcement',
         announcement_text: `📣 ${targetPlayer.name} (N° ${targetPlayer.number}) a été désigné par le village, mais c'est l'Idiot du Village ! Il est gracié mais perd son vote.`
@@ -2702,7 +2953,8 @@ function setupGMEventListeners() {
     // Gérer l'ange : si éliminé au Jour 1, il gagne immédiatement
     // (On peut vérifier si lovers est vide pour deviner si c'est le jour 1, ou simplement valider).
 
-    // Éliminer le joueur
+    // Éliminer le joueur et log
+    await addHistoryEvent('death', `🗳️ VOTE DU VILLAGE : ${targetPlayer.name} (N° ${targetPlayer.number}) a été éliminé par le village. Rôle : ${ROLES_INFO[targetPlayer.role]?.title || targetPlayer.role}.`);
     await supabaseClient.from('players').update({ status: 'dead' }).eq('id', targetPlayer.id);
 
     // Vérifier les amoureux
@@ -2710,6 +2962,8 @@ function setupGMEventListeners() {
       const otherId = gameState.lovers.find(id => id !== targetPlayer.id);
       const other = players.find(p => p.id === otherId);
       if (other && other.status === 'alive') {
+        // Log de mort par chagrin d'amour
+        await addHistoryEvent('death', `💔 MORT DE CHAGRIN : ${other.name} (N° ${other.number}) a succombé de chagrin.`);
         await supabaseClient.from('players').update({ status: 'dead' }).eq('id', other.id);
         alert(`💔 ${other.name} (N° ${other.number}) s'est donné la mort par chagrin d'amour !`);
       }
@@ -2720,6 +2974,9 @@ function setupGMEventListeners() {
     const winners = checkGameOverConditions(updatedPlayers);
 
     if (winners) {
+      const victoryText = getVictoryText(winners);
+      await addHistoryEvent('info', victoryText);
+
       await supabaseClient.from('game_state').update({
         phase: 'game_over',
         winners: winners
@@ -2979,6 +3236,10 @@ async function distributeRolesAndStartGame(isAuto = false) {
     timer_started_at: new Date().toISOString()
   }).eq('id', 1);
 
+  // Enregistrer le début de la partie dans l'historique
+  localHistory = [];
+  await addHistoryEvent('setup', `La partie commence avec ${players.length} joueurs. Rôles distribués (${wolvesCount} Loups-Garous).`);
+
   return true;
 }
 
@@ -3150,6 +3411,9 @@ async function simulateCurrentPhaseActions() {
           const shuffled = [...allAlive];
           shuffleArray(shuffled);
           const lovers = [shuffled[0].id, shuffled[1].id];
+          
+          await addHistoryEvent('night', `💘 Cupidon a lié ${shuffled[0].name} (N° ${shuffled[0].number}) et ${shuffled[1].name} (N° ${shuffled[1].number}) par les liens sacrés de l'amour.`);
+
           await supabaseClient.from('game_state').update({ lovers }).eq('id', 1);
           if (statusText) statusText.textContent = "Cupidon bot a lié les amoureux.";
         }
@@ -3158,6 +3422,9 @@ async function simulateCurrentPhaseActions() {
       const gardeBot = botPlayers.find(p => p.role === 'garde');
       if (gardeBot) {
         const target = allAlive[Math.floor(Math.random() * allAlive.length)];
+        
+        await addHistoryEvent('night', `🛡️ Le Garde a protégé ${target.name} (N° ${target.number}).`);
+
         await supabaseClient.from('game_state').update({ current_night_saves: [target.number] }).eq('id', 1);
         await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', gardeBot.id);
         if (statusText) statusText.textContent = `Garde bot a protégé N° ${target.number}.`;
@@ -3168,6 +3435,9 @@ async function simulateCurrentPhaseActions() {
         const targets = allAlive.filter(p => p.id !== voyanteBot.id);
         if (targets.length > 0) {
           const target = targets[Math.floor(Math.random() * targets.length)];
+          
+          await addHistoryEvent('night', `🔮 La Voyante a inspecté le rôle de ${target.name} (N° ${target.number}).`);
+
           await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', voyanteBot.id);
           if (statusText) statusText.textContent = `Voyante bot a inspecté N° ${target.number}.`;
         }
@@ -3185,6 +3455,8 @@ async function simulateCurrentPhaseActions() {
         if (kills.length > 0 && !healUsed && Math.random() < 0.5) {
           newKills = [];
           healUsed = true;
+          
+          await addHistoryEvent('night', `🧪 La Sorcière a utilisé sa potion de vie pour ressusciter la victime des Loups-Garous.`);
         }
         
         if (!poisonUsed && Math.random() < 0.3) {
@@ -3193,6 +3465,8 @@ async function simulateCurrentPhaseActions() {
             const target = targets[Math.floor(Math.random() * targets.length)];
             newPoisons = [target.number];
             poisonUsed = true;
+            
+            await addHistoryEvent('night', `🧪 La Sorcière a empoisonné ${target.name} (N° ${target.number}).`);
           }
         }
         
@@ -3214,10 +3488,16 @@ async function simulateCurrentPhaseActions() {
           const shuffled = [...targets];
           shuffleArray(shuffled);
           const charmedIds = [shuffled[0].id, shuffled[1].id];
+          
+          const names = charmedIds.map(id => allAlive.find(p => p.id === id)).filter(p => p).map(p => `${p.name} (N° ${p.number})`).join(' et ');
+          await addHistoryEvent('night', `🎶 Le Flûteur a charmé ${names}.`);
+
           await supabaseClient.from('players').update({ charmed: true }).in('id', charmedIds);
           await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', fluteurBot.id);
           if (statusText) statusText.textContent = `Flûteur bot a charmé N° ${shuffled[0].number} et N° ${shuffled[1].number}.`;
         } else if (targets.length > 0) {
+          await addHistoryEvent('night', `🎶 Le Flûteur a charmé ${targets[0].name} (N° ${targets[0].number}).`);
+
           await supabaseClient.from('players').update({ charmed: true }).eq('id', targets[0].id);
           await supabaseClient.from('players').update({ vote_target: 999 }).eq('id', fluteurBot.id);
           if (statusText) statusText.textContent = `Flûteur bot a charmé N° ${targets[0].number}.`;
@@ -3264,6 +3544,10 @@ async function simulateCurrentPhaseActions() {
         shuffleArray(shuffled);
         const chosen = shuffled.slice(0, Math.min(spotsLeft, shuffled.length));
         
+        // Log de tranchement du maire bot
+        const names = chosen.map(p => `${p.name} (N° ${p.number})`).join(', ');
+        await addHistoryEvent('death', `⚖️ ARBITRAGE DU MAIRE : Le Maire bot ${mayor.name} (N° ${mayor.number}) a tranché l'égalité et a éliminé ${names}.`);
+
         const updates = chosen.map(p => {
           return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
         });
@@ -3294,6 +3578,11 @@ async function advanceToNight() {
       break;
     }
   }
+
+  // Log de début de nuit
+  const currentHistory = Array.isArray(gameState.game_history) ? gameState.game_history : [];
+  const nightCount = currentHistory.filter(e => e.type === 'night_start').length + 1;
+  await addHistoryEvent('night_start', `🌙 Nuit ${nightCount} : Le village s'endort...`);
 
   // Mettre à jour la phase à night et vider les variables de nuit
   await supabaseClient.from('game_state').update({
@@ -3331,6 +3620,16 @@ async function calculateLoupNightKill() {
 
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     const topTargets = sorted.slice(0, limit).map(([targetNum]) => parseInt(targetNum));
+
+    if (topTargets.length > 0) {
+      const names = topTargets.map(num => {
+        const p = players.find(x => x.number === num);
+        return p ? `${p.name} (N° ${p.number})` : `Joueur N° ${num}`;
+      }).join(', ');
+      await addHistoryEvent('night', `🐺 Les Loups-Garous ont attaqué ${names}.`);
+    } else {
+      await addHistoryEvent('night', `🐺 Les Loups-Garous n'ont trouvé aucune proie ce soir.`);
+    }
 
     await supabaseClient.from('game_state').update({
       current_night_kills: topTargets
@@ -3639,6 +3938,9 @@ async function resolveMayorElection() {
   if (mayorPlayer) {
     await supabaseClient.from('players').update({ is_mayor: true }).eq('id', mayorPlayer.id);
     
+    // Log election maire
+    await addHistoryEvent('info', `👑 ÉLECTION DU MAIRE : ${mayorPlayer.name} (N° ${mayorPlayer.number}) a été élu Maire.`);
+
     await supabaseClient.from('game_state').update({
       announcement_text: `👑 ${mayorPlayer.name} (N° ${mayorPlayer.number}) a été élu Maire !`
     }).eq('id', 1);
@@ -3695,6 +3997,17 @@ async function wakeUpVillage() {
   if (deadThisNight.length > 0) {
     const uniqueDeads = [...new Set(deadThisNight)];
     
+    // Log des morts dans l'historique
+    for (const num of uniqueDeads) {
+      const p = allPlayers.find(x => x.number === num);
+      if (p) {
+        await addHistoryEvent('death', `☠️ MORT DE NUIT : ${p.name} (N° ${p.number}) qui était ${ROLES_INFO[p.role]?.title || p.role}.`);
+      }
+    }
+    if (loverDied) {
+      await addHistoryEvent('death', `💔 MORT DE CHAGRIN : Un des amoureux a succombé de chagrin.`);
+    }
+
     const killUpdates = uniqueDeads.map(num => {
       const p = allPlayers.find(x => x.number === num);
       if (p) {
@@ -3710,12 +4023,16 @@ async function wakeUpVillage() {
     }
   } else {
     announcement = "🍀 Aucun mort cette nuit. Le village respire !";
+    await addHistoryEvent('info', `🍀 Aucun mort cette nuit. Le village se réveille en paix !`);
   }
 
   const { data: updatedPlayers } = await supabaseClient.from('players').select('*');
   const winners = checkGameOverConditions(updatedPlayers);
 
   if (winners) {
+    const victoryText = getVictoryText(winners);
+    await addHistoryEvent('info', victoryText);
+    
     await supabaseClient.from('game_state').update({
       phase: 'game_over',
       winners: winners,
@@ -3826,6 +4143,8 @@ async function finishDayVoteTiebreak(resolvedByMayor) {
     const { data: updatedPlayers } = await supabaseClient.from('players').select('*');
     const winners = checkGameOverConditions(updatedPlayers);
     if (winners) {
+      const victoryText = getVictoryText(winners);
+      await addHistoryEvent('info', victoryText);
       await supabaseClient.from('game_state').update({
         phase: 'game_over',
         winners: winners
@@ -3847,6 +4166,10 @@ async function finishDayVoteTiebreak(resolvedByMayor) {
     shuffleArray(alivePlayers);
     const chosen = alivePlayers.slice(0, spotsLeft);
 
+    // Log d'arbitrage expiré dans l'historique
+    const names = chosen.map(p => `${p.name} (N° ${p.number})`).join(', ');
+    await addHistoryEvent('death', `⚖️ ARBITRAGE EXPIRÉ : Le temps imparti au maire a expiré. Le destin a éliminé aléatoirement ${names}.`);
+
     const updates = chosen.map(p => {
       return supabaseClient.from('players').update({ status: 'dead' }).eq('id', p.id);
     });
@@ -3855,6 +4178,8 @@ async function finishDayVoteTiebreak(resolvedByMayor) {
     const { data: updatedPlayers } = await supabaseClient.from('players').select('*');
     const winners = checkGameOverConditions(updatedPlayers);
     if (winners) {
+      const victoryText = getVictoryText(winners);
+      await addHistoryEvent('info', victoryText);
       await supabaseClient.from('game_state').update({
         phase: 'game_over',
         winners: winners
@@ -3882,6 +4207,14 @@ async function executeDayEliminations(playersToKill) {
     }
   }
 
+  // Log de vote du village dans l'historique
+  for (const p of playersToKill) {
+    await addHistoryEvent('death', `🗳️ VOTE DU VILLAGE : ${p.name} (N° ${p.number}) a été éliminé par le village. Rôle : ${ROLES_INFO[p.role]?.title || p.role}.`);
+  }
+  if (loverDied) {
+    await addHistoryEvent('death', `💔 MORT DE CHAGRIN : Un des amoureux a succombé de chagrin.`);
+  }
+
   let text = "☠️ Le village a éliminé :<br>";
   playersToKill.forEach(p => {
     text += `<strong>${p.name}</strong> (N° ${p.number}) qui était <i>${ROLES_INFO[p.role]?.title || p.role}</i>.<br>`;
@@ -3894,6 +4227,9 @@ async function executeDayEliminations(playersToKill) {
   const winners = checkGameOverConditions(updatedPlayers);
 
   if (winners) {
+    const victoryText = getVictoryText(winners);
+    await addHistoryEvent('info', victoryText);
+
     await supabaseClient.from('game_state').update({
       phase: 'game_over',
       winners: winners,
@@ -3910,6 +4246,9 @@ async function executeDayEliminations(playersToKill) {
 }
 
 async function announceNoDayElimination() {
+  // Log de vote blanc dans l'historique
+  await addHistoryEvent('info', `📣 DÉBATS : L'Assemblée a voté blanc, aucun suspect n'a été éliminé.`);
+
   await supabaseClient.from('game_state').update({
     phase: 'day_announcement',
     announcement_text: "📣 Les villageois n'ont désigné aucun coupable aujourd'hui.",
