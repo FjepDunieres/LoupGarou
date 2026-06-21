@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS game_state (
     current_night_saves JSONB DEFAULT '[]'::jsonb, -- Numéros sauvés par le garde
     current_night_poisons JSONB DEFAULT '[]'::jsonb, -- Numéros empoisonnés par la sorcière
     winners TEXT DEFAULT '',
+    is_auto_mode BOOLEAN DEFAULT FALSE,
     last_update TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT one_row CHECK (id = 1) -- Force l'existence d'une seule et unique ligne
 );
@@ -46,9 +47,27 @@ CREATE TABLE IF NOT EXISTS players (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Désactiver RLS (Row Level Security) pour permettre l'accès anonyme (nécessaire pour le jeu temps réel)
-ALTER TABLE game_state DISABLE ROW LEVEL SECURITY;
-ALTER TABLE players DISABLE ROW LEVEL SECURITY;
+-- Activer RLS (Row Level Security) pour sécuriser l'accès tout en permettant le fonctionnement du jeu
+ALTER TABLE game_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE players ENABLE ROW LEVEL SECURITY;
+
+-- Nettoyage des anciennes politiques (pour éviter les erreurs de doublons lors d'exécutions multiples)
+DROP POLICY IF EXISTS "Lecture publique pour game_state" ON game_state;
+DROP POLICY IF EXISTS "Modification publique pour game_state" ON game_state;
+DROP POLICY IF EXISTS "Contrôle total GM pour game_state" ON game_state;
+DROP POLICY IF EXISTS "Lecture publique pour players" ON players;
+DROP POLICY IF EXISTS "Modification publique pour players" ON players;
+DROP POLICY IF EXISTS "Contrôle total GM pour players" ON players;
+
+-- Politiques pour la table game_state
+CREATE POLICY "Lecture publique pour game_state" ON game_state FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Modification publique pour game_state" ON game_state FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "Contrôle total GM pour game_state" ON game_state FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- Politiques pour la table players
+CREATE POLICY "Lecture publique pour players" ON players FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Modification publique pour players" ON players FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "Contrôle total GM pour players" ON players FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- 4. Fonction PL/pgSQL sécurisée pour rejoindre le lobby
 -- Assure l'attribution d'un numéro incrémental unique de 1 à N de manière transactionnelle

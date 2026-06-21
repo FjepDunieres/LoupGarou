@@ -136,6 +136,23 @@
           <div class="glass" style="padding: 20px; margin-bottom: 25px; border-color: rgba(255, 255, 255, 0.1); text-align: left;">
             <h3 class="title-glow" style="font-size: 1.1rem; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">⚙️ Configuration de la Partie</h3>
             
+            <!-- Mode Jeu Automatique -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+              <div>
+                <strong style="font-size: 0.9rem; color: var(--neon-blue); display: flex; align-items: center; gap: 6px;">🤖 Jeu Automatique</strong>
+                <div style="font-size: 0.75rem; color: var(--color-muted);">Session automatique toutes les 10 minutes</div>
+              </div>
+              <div style="display: flex; align-items: center;">
+                <input type="checkbox" id="gm-auto-game" style="width: auto; cursor: pointer; height: 18px; width: 18px; margin: 0;">
+              </div>
+            </div>
+
+            <!-- GM Auto Lobby timer box -->
+            <div id="gm-lobby-timer-container" class="hidden" style="margin-bottom: 20px; padding: 12px; background: rgba(0, 210, 255, 0.05); border: 1px dashed var(--neon-blue); border-radius: 8px; text-align: center;">
+              <span style="font-size: 0.75rem; color: var(--color-muted); display: block; text-transform: uppercase; letter-spacing: 0.05em;">Lancement auto dans :</span>
+              <span id="gm-lobby-timer-val" style="font-size: 1.6rem; font-weight: 800; color: var(--neon-blue); text-shadow: 0 0 10px rgba(0,210,255,0.3);">10:00</span>
+            </div>
+
             <!-- Wolves count selector -->
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
               <div>
@@ -402,6 +419,12 @@
             Ou accédez à l'adresse :<br>
             <a id="tab-lobby-url" href="#" class="join-url-link">https://fjepdunieres.github.io/LoupGarou/</a>
           </div>
+
+          <!-- Tableau Auto Lobby timer box -->
+          <div id="tab-lobby-timer-container" class="hidden" style="margin-top: 25px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05); text-align: center;">
+            <div style="font-size: 0.9rem; color: var(--color-muted); letter-spacing: 0.05em; text-transform: uppercase;">PROCHAINE PARTIE DANS</div>
+            <div id="tab-lobby-timer" style="font-size: 3rem; font-weight: 800; color: var(--neon-blue); text-shadow: 0 0 15px rgba(0,210,255,0.5); margin-top: 5px;">10:00</div>
+          </div>
         </div>
         
         <div class="lobby-players-side glass">
@@ -464,7 +487,13 @@
           <p style="font-size: 0.85rem; color: var(--color-muted);">Gardez ce numéro en tête. Il vous identifiera sur le tableau d'affichage géant.</p>
         </div>
 
-        <p style="font-size: 1rem; animation: float 4s ease-in-out infinite;">⏳ En attente du lancement par le Game Master...</p>
+        <p id="player-lobby-status" style="font-size: 1rem; animation: float 4s ease-in-out infinite;">⏳ En attente du lancement par le Game Master...</p>
+        
+        <!-- Player Auto Lobby timer box -->
+        <div id="player-lobby-timer-container" class="hidden" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.05); text-align: center;">
+          <span style="font-size: 0.8rem; color: var(--color-muted); display: block; text-transform: uppercase; letter-spacing: 0.05em;">PROCHAINE PARTIE DANS</span>
+          <span id="player-lobby-timer" style="font-size: 2.2rem; font-weight: 800; color: var(--neon-blue); text-shadow: 0 0 10px rgba(0,210,255,0.4); display: block; margin-top: 5px;">10:00</span>
+        </div>
       </div>
     </div>
 

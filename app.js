@@ -370,6 +370,18 @@ function handleMyPlayerUpdate() {
 function handleGameStateUpdate() {
   if (gameState.phase === 'lobby') {
     showPlayerStep('player-step-lobby');
+    if (gameState.is_auto_mode && gameState.timer_duration > 0 && gameState.timer_started_at) {
+      startPlayerLobbyTimer(gameState.timer_duration, gameState.timer_started_at);
+    } else {
+      if (playerLobbyTimerInterval) {
+        clearInterval(playerLobbyTimerInterval);
+        playerLobbyTimerInterval = null;
+      }
+      const containerEl = document.getElementById('player-lobby-timer-container');
+      if (containerEl) containerEl.classList.add('hidden');
+      const statusEl = document.getElementById('player-lobby-status');
+      if (statusEl) statusEl.textContent = "⏳ En attente du lancement par le Game Master...";
+    }
     return;
   }
 
@@ -1104,6 +1116,66 @@ function startDiscussionTimer(duration, startedAt) {
   timerInterval = setInterval(update, 1000);
 }
 
+// --- MINUTEUR LOBBY JOUEUR (MODE AUTO) ---
+let playerLobbyTimerInterval = null;
+function startPlayerLobbyTimer(duration, startedAt) {
+  if (playerLobbyTimerInterval) clearInterval(playerLobbyTimerInterval);
+
+  const timerEl = document.getElementById('player-lobby-timer');
+  const containerEl = document.getElementById('player-lobby-timer-container');
+  const statusEl = document.getElementById('player-lobby-status');
+
+  if (!timerEl || !containerEl) return;
+
+  containerEl.classList.remove('hidden');
+  if (statusEl) statusEl.textContent = "⏳ Mode automatique actif. En attente du départ...";
+
+  const update = () => {
+    const startTime = new Date(startedAt).getTime();
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const timeLeft = duration - elapsed;
+
+    if (timeLeft <= 0) {
+      timerEl.textContent = "Lancement...";
+      clearInterval(playerLobbyTimerInterval);
+    } else {
+      timerEl.textContent = formatTime(timeLeft);
+    }
+  };
+
+  update();
+  playerLobbyTimerInterval = setInterval(update, 1000);
+}
+
+// --- MINUTEUR LOBBY TABLEAU (MODE AUTO) ---
+let tabLobbyTimerInterval = null;
+function startTabLobbyTimer(duration, startedAt) {
+  if (tabLobbyTimerInterval) clearInterval(tabLobbyTimerInterval);
+
+  const timerEl = document.getElementById('tab-lobby-timer');
+  const containerEl = document.getElementById('tab-lobby-timer-container');
+
+  if (!timerEl || !containerEl) return;
+
+  containerEl.classList.remove('hidden');
+
+  const update = () => {
+    const startTime = new Date(startedAt).getTime();
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const timeLeft = duration - elapsed;
+
+    if (timeLeft <= 0) {
+      timerEl.textContent = "Lancement...";
+      clearInterval(tabLobbyTimerInterval);
+    } else {
+      timerEl.textContent = formatTime(timeLeft);
+    }
+  };
+
+  update();
+  tabLobbyTimerInterval = setInterval(update, 1000);
+}
+
 // --- VOTE FINAL DU CHASSEUR ---
 async function showChasseurDeathPanel() {
   document.getElementById('player-sub-alive').classList.add('hidden');
@@ -1366,6 +1438,17 @@ function renderTableau() {
     
     phaseSub.innerHTML = `Lobby d'inscription — Scannez le QR Code pour rejoindre`;
     timerBox.classList.add('hidden');
+
+    if (gameState.is_auto_mode && gameState.timer_duration > 0 && gameState.timer_started_at) {
+      startTabLobbyTimer(gameState.timer_duration, gameState.timer_started_at);
+    } else {
+      if (tabLobbyTimerInterval) {
+        clearInterval(tabLobbyTimerInterval);
+        tabLobbyTimerInterval = null;
+      }
+      const tabLobbyTimerContainer = document.getElementById('tab-lobby-timer-container');
+      if (tabLobbyTimerContainer) tabLobbyTimerContainer.classList.add('hidden');
+    }
     
     // Déterminer l'URL d'inscription
     let joinUrl = "https://fjepdunieres.github.io/LoupGarou/";
@@ -1408,6 +1491,13 @@ function renderTableau() {
   } else {
     lobbyContainer.classList.add('hidden');
     mainGrid.classList.remove('hidden');
+
+    if (tabLobbyTimerInterval) {
+      clearInterval(tabLobbyTimerInterval);
+      tabLobbyTimerInterval = null;
+    }
+    const tabLobbyTimerContainer = document.getElementById('tab-lobby-timer-container');
+    if (tabLobbyTimerContainer) tabLobbyTimerContainer.classList.add('hidden');
   }
 
   // Arrêter l'ancien minuteur s'il tourne
@@ -1674,6 +1764,16 @@ function loadGMConfigs() {
     configMayorTimerVal = parseInt(mayor);
     const el = document.getElementById('config-mayor-timer');
     if (el) el.value = configMayorTimerVal;
+  }
+  const autoGame = localStorage.getItem('cfg_auto_game');
+  if (autoGame === 'true') {
+    const el = document.getElementById('gm-auto-game');
+    if (el) el.checked = true;
+    const simAuto = document.getElementById('sim-auto-pilot');
+    if (simAuto) {
+      simAuto.checked = true;
+      simAuto.disabled = true;
+    }
   }
 }
 
@@ -2314,6 +2414,46 @@ function setupGMEventListeners() {
     });
   }
 
+  // Case à cocher Jeu Automatique
+  const autoGameCheckbox = document.getElementById('gm-auto-game');
+  if (autoGameCheckbox) {
+    autoGameCheckbox.addEventListener('change', async () => {
+      const isAuto = autoGameCheckbox.checked;
+      localStorage.setItem('cfg_auto_game', isAuto);
+      
+      const simAuto = document.getElementById('sim-auto-pilot');
+      if (simAuto) {
+        if (isAuto) {
+          simAuto.checked = true;
+          simAuto.disabled = true;
+        } else {
+          simAuto.disabled = false;
+        }
+      }
+      
+      // Activer/Désactiver le minuteur du lobby en base
+      if (gameState && gameState.phase === 'lobby') {
+        if (isAuto) {
+          await supabaseClient.from('game_state').update({
+            is_auto_mode: true,
+            timer_duration: 600, // 10 minutes
+            timer_started_at: new Date().toISOString()
+          }).eq('id', 1);
+        } else {
+          await supabaseClient.from('game_state').update({
+            is_auto_mode: false,
+            timer_duration: 0,
+            timer_started_at: null
+          }).eq('id', 1);
+        }
+      } else {
+        await supabaseClient.from('game_state').update({
+          is_auto_mode: isAuto
+        }).eq('id', 1);
+      }
+    });
+  }
+
   // Lancer la partie / Distribuer rôles
   document.getElementById('btn-gm-start-game').addEventListener('click', async () => {
     if (gameState.phase === 'distributing') {
@@ -2322,82 +2462,8 @@ function setupGMEventListeners() {
       return;
     }
 
-    if (players.length < 4) {
-      alert("Il faut au moins 4 joueurs pour lancer une partie.");
-      return;
-    }
-
     document.getElementById('btn-gm-start-game').disabled = true;
-
-    // Distribuer les rôles selon la configuration du GM
-    const customRoles = [];
-    for (let i = 0; i < configWolvesCount; i++) {
-      customRoles.push('loup');
-    }
-
-    const specialRoleMapping = {
-      'chk-role-voyante': 'voyante',
-      'chk-role-sorciere': 'sorciere',
-      'chk-role-chasseur': 'chasseur',
-      'chk-role-cupidon': 'cupidon',
-      'chk-role-garde': 'garde',
-      'chk-role-fluteur': 'fluteur',
-      'chk-role-ange': 'ange',
-      'chk-role-idiot': 'idiot',
-      'chk-role-ancien': 'ancien'
-    };
-
-    for (const [chkId, roleKey] of Object.entries(specialRoleMapping)) {
-      const chk = document.getElementById(chkId);
-      if (chk && chk.checked) {
-        customRoles.push(roleKey);
-      }
-    }
-
-    if (customRoles.length > players.length) {
-      alert(`Erreur : Le nombre de rôles configurés (${customRoles.length}) dépasse le nombre de joueurs inscrits (${players.length}).`);
-      document.getElementById('btn-gm-start-game').disabled = false;
-      return;
-    }
-
-    const villagersCount = players.length - customRoles.length;
-    for (let i = 0; i < villagersCount; i++) {
-      customRoles.push('villageois');
-    }
-
-    // Mélanger les rôles
-    shuffleArray(customRoles);
-
-    // Mettre à jour chaque joueur avec son rôle
-    const updates = players.map((p, idx) => {
-      return supabaseClient
-        .from('players')
-        .update({
-          role: customRoles[idx],
-          status: 'alive',
-          charmed: false,
-          vote_target: null,
-          is_mayor: false
-        })
-        .eq('id', p.id);
-    });
-
-    await Promise.all(updates);
-
-    // Initialiser l'état du jeu à distribution avec minuteur de 10s
-    await supabaseClient.from('game_state').update({
-      phase: 'distributing',
-      lovers: [],
-      current_night_kills: [],
-      current_night_saves: [],
-      current_night_poisons: [],
-      witch_heal_used: false,
-      witch_poison_used: false,
-      winners: '',
-      timer_duration: 10,
-      timer_started_at: new Date().toISOString()
-    }).eq('id', 1);
-
+    await distributeRolesAndStartGame(false);
     document.getElementById('btn-gm-start-game').disabled = false;
   });
 
@@ -2709,6 +2775,136 @@ function setupSimulator() {
     triggerBtn.disabled = false;
     await syncGMData();
   });
+}
+
+async function distributeRolesAndStartGame(isAuto = false) {
+  if (players.length < 4) {
+    if (!isAuto) alert("Il faut au moins 4 joueurs pour lancer une partie.");
+    return false;
+  }
+
+  // Distribuer les rôles selon la configuration du GM
+  const customRoles = [];
+  for (let i = 0; i < configWolvesCount; i++) {
+    customRoles.push('loup');
+  }
+
+  const specialRoleMapping = {
+    'chk-role-voyante': 'voyante',
+    'chk-role-sorciere': 'sorciere',
+    'chk-role-chasseur': 'chasseur',
+    'chk-role-cupidon': 'cupidon',
+    'chk-role-garde': 'garde',
+    'chk-role-fluteur': 'fluteur',
+    'chk-role-ange': 'ange',
+    'chk-role-idiot': 'idiot',
+    'chk-role-ancien': 'ancien'
+  };
+
+  for (const [chkId, roleKey] of Object.entries(specialRoleMapping)) {
+    const chk = document.getElementById(chkId);
+    if (chk && chk.checked) {
+      customRoles.push(roleKey);
+    }
+  }
+
+  if (customRoles.length > players.length) {
+    if (!isAuto) alert(`Erreur : Le nombre de rôles configurés (${customRoles.length}) dépasse le nombre de joueurs inscrits (${players.length}).`);
+    return false;
+  }
+
+  const villagersCount = players.length - customRoles.length;
+  for (let i = 0; i < villagersCount; i++) {
+    customRoles.push('villageois');
+  }
+
+  // Mélanger les rôles
+  shuffleArray(customRoles);
+
+  // Mettre à jour chaque joueur avec son rôle
+  const updates = players.map((p, idx) => {
+    return supabaseClient
+      .from('players')
+      .update({
+        role: customRoles[idx],
+        status: 'alive',
+        charmed: false,
+        vote_target: null,
+        is_mayor: false
+      })
+      .eq('id', p.id);
+  });
+
+  await Promise.all(updates);
+
+  // Initialiser l'état du jeu à distribution avec minuteur de 10s
+  await supabaseClient.from('game_state').update({
+    phase: 'distributing',
+    lovers: [],
+    current_night_kills: [],
+    current_night_saves: [],
+    current_night_poisons: [],
+    witch_heal_used: false,
+    witch_poison_used: false,
+    winners: '',
+    timer_duration: 10,
+    timer_started_at: new Date().toISOString()
+  }).eq('id', 1);
+
+  return true;
+}
+
+async function autoLaunchGame() {
+  console.log("[Auto-Pilot] Démarrage automatique du lobby...");
+  
+  // 1. Récupérer les joueurs les plus récents depuis la base de données
+  const { data: latestPlayers, error } = await supabaseClient
+    .from('players')
+    .select('*')
+    .order('number');
+    
+  if (error || !latestPlayers) {
+    console.error("Erreur lors de la récupération des joueurs:", error);
+    // Reporter d'une minute en cas d'erreur réseau
+    await supabaseClient.from('game_state').update({
+      timer_duration: 60,
+      timer_started_at: new Date().toISOString()
+    }).eq('id', 1);
+    return;
+  }
+  
+  // Filtrer les vrais joueurs
+  const realPlayers = latestPlayers.filter(p => !p.name.startsWith('[Bot]'));
+  
+  if (realPlayers.length === 0) {
+    console.log("[Auto-Pilot] Aucun joueur réel inscrit. Report de la session de 10 minutes.");
+    // Report de 10 minutes (600s)
+    await supabaseClient.from('game_state').update({
+      timer_duration: 600,
+      timer_started_at: new Date().toISOString()
+    }).eq('id', 1);
+    return;
+  }
+  
+  // 2. Compléter à 50 joueurs avec des bots
+  const botsNeeded = 50 - latestPlayers.length;
+  if (botsNeeded > 0) {
+    console.log(`[Auto-Pilot] Complétion du lobby avec ${botsNeeded} bots pour atteindre 50 joueurs.`);
+    await generateBots(botsNeeded);
+    // Attendre 2s pour que les sockets realtime mettent à jour la liste locale
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  
+  // 3. Lancer la partie en distribuant les rôles
+  const success = await distributeRolesAndStartGame(true);
+  if (!success) {
+    console.error("[Auto-Pilot] Échec du lancement automatique.");
+    // Reporter d'une minute en cas d'échec
+    await supabaseClient.from('game_state').update({
+      timer_duration: 60,
+      timer_started_at: new Date().toISOString()
+    }).eq('id', 1);
+  }
 }
 
 async function generateBots(count) {
@@ -3137,6 +3333,72 @@ function runGlobalAutoPilot() {
     const phase = gameState.phase;
     const duration = gameState.timer_duration;
     const startedAt = gameState.timer_started_at;
+
+    // Gérer l'affichage du minuteur sur l'écran GM (lobby)
+    const lobbyTimerVal = document.getElementById('gm-lobby-timer-val');
+    const lobbyTimerContainer = document.getElementById('gm-lobby-timer-container');
+    if (gameState.is_auto_mode && phase === 'lobby' && startedAt && duration > 0) {
+      if (lobbyTimerContainer) lobbyTimerContainer.classList.remove('hidden');
+      const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+      const left = duration - elapsed;
+      if (lobbyTimerVal) {
+        if (left > 0) {
+          lobbyTimerVal.textContent = formatTime(left);
+        } else {
+          lobbyTimerVal.textContent = "Lancement...";
+        }
+      }
+    } else {
+      if (lobbyTimerContainer) lobbyTimerContainer.classList.add('hidden');
+    }
+
+    // Gestion du démarrage automatique du lobby
+    if (gameState.is_auto_mode && phase === 'lobby') {
+      if (!startedAt || duration <= 0) {
+        // Initialiser le compte à rebours de 10 min (600s)
+        await supabaseClient.from('game_state').update({
+          timer_duration: 600,
+          timer_started_at: new Date().toISOString()
+        }).eq('id', 1);
+        return;
+      }
+
+      const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+      const left = duration - elapsed;
+
+      if (left <= 0) {
+        console.log("[Auto-Pilot] Compte à rebours du lobby expiré. Lancement...");
+        clearInterval(globalAutoPilotInterval);
+        await autoLaunchGame();
+        runGlobalAutoPilot();
+      }
+      return; // Ne pas exécuter le reste de la boucle de jeu dans la phase lobby
+    }
+
+    // Gestion de la fin de partie automatique (30 secondes d'attente puis reset)
+    if (gameState.is_auto_mode && phase === 'game_over') {
+      if (!startedAt || duration <= 0) {
+        await supabaseClient.from('game_state').update({
+          timer_duration: 30, // 30s d'affichage des résultats
+          timer_started_at: new Date().toISOString()
+        }).eq('id', 1);
+        return;
+      }
+
+      const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+      const left = duration - elapsed;
+
+      if (left <= 0) {
+        console.log("[Auto-Pilot] Temps de fin de partie écoulé. Réinitialisation et retour au lobby.");
+        clearInterval(globalAutoPilotInterval);
+        const { error } = await supabaseClient.rpc('reset_game');
+        if (error) {
+          console.error("Erreur lors de la réinitialisation de la partie:", error);
+        }
+        runGlobalAutoPilot();
+      }
+      return; // Ne pas exécuter le reste de la boucle de jeu dans la phase game_over
+    }
 
     if (!startedAt || duration <= 0) return;
 
