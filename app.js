@@ -370,8 +370,20 @@ function handleMyPlayerUpdate() {
 function handleGameStateUpdate() {
   if (gameState.phase === 'lobby') {
     showPlayerStep('player-step-lobby');
-    if (gameState.is_auto_mode && gameState.timer_duration > 0 && gameState.timer_started_at) {
-      startPlayerLobbyTimer(gameState.timer_duration, gameState.timer_started_at);
+    if (gameState.is_auto_mode) {
+      const containerEl = document.getElementById('player-lobby-timer-container');
+      const statusEl = document.getElementById('player-lobby-status');
+      if (statusEl) statusEl.textContent = "⏳ Mode automatique actif. La partie va commencer sous peu...";
+      
+      if (gameState.timer_duration > 0 && gameState.timer_started_at) {
+        startPlayerLobbyTimer(gameState.timer_duration, gameState.timer_started_at);
+      } else {
+        if (playerLobbyTimerInterval) {
+          clearInterval(playerLobbyTimerInterval);
+          playerLobbyTimerInterval = null;
+        }
+        if (containerEl) containerEl.classList.add('hidden');
+      }
     } else {
       if (playerLobbyTimerInterval) {
         clearInterval(playerLobbyTimerInterval);
@@ -1833,6 +1845,44 @@ function renderGMPanel() {
     return;
   }
 
+  // Synchroniser le bouton automatique avec l'état réel de la base
+  const autoGameCheckbox = document.getElementById('gm-auto-game');
+  const autoGameBtn = document.getElementById('btn-gm-toggle-auto');
+  if (autoGameCheckbox && autoGameBtn) {
+    const isAuto = !!gameState.is_auto_mode;
+    if (autoGameCheckbox.checked !== isAuto) {
+      autoGameCheckbox.checked = isAuto;
+      localStorage.setItem('cfg_auto_game', isAuto);
+      
+      const simAuto = document.getElementById('sim-auto-pilot');
+      if (simAuto) {
+        if (isAuto) {
+          simAuto.checked = true;
+          simAuto.disabled = true;
+        } else {
+          simAuto.disabled = false;
+        }
+      }
+    }
+    
+    // Mettre à jour l'apparence du bouton
+    if (isAuto) {
+      autoGameBtn.textContent = "DÉSACTIVER LE MODE AUTOMATIQUE";
+      autoGameBtn.className = "btn btn-accent";
+      autoGameBtn.style.boxShadow = "0 0 15px rgba(0, 245, 212, 0.4)";
+      autoGameBtn.style.borderColor = "var(--neon-green)";
+      const panel = document.getElementById('gm-auto-panel');
+      if (panel) panel.style.borderColor = "rgba(0, 245, 212, 0.6)";
+    } else {
+      autoGameBtn.textContent = "ACTIVER LE MODE AUTOMATIQUE";
+      autoGameBtn.className = "btn btn-secondary";
+      autoGameBtn.style.boxShadow = "none";
+      autoGameBtn.style.borderColor = "rgba(255,255,255,0.15)";
+      const panel = document.getElementById('gm-auto-panel');
+      if (panel) panel.style.borderColor = "rgba(0, 210, 255, 0.25)";
+    }
+  }
+
   const total = players.length;
   const alive = players.filter(p => p.status === 'alive').length;
   const wolves = players.filter(p => p.status === 'alive' && p.role === 'loup').length;
@@ -2414,11 +2464,39 @@ function setupGMEventListeners() {
     });
   }
 
-  // Case à cocher Jeu Automatique
+  // Bouton de bascule du Mode Automatique
+  const autoGameBtn = document.getElementById('btn-gm-toggle-auto');
   const autoGameCheckbox = document.getElementById('gm-auto-game');
-  if (autoGameCheckbox) {
-    autoGameCheckbox.addEventListener('change', async () => {
-      const isAuto = autoGameCheckbox.checked;
+  if (autoGameBtn && autoGameCheckbox) {
+    // Fonction helper pour mettre à jour l'apparence visuelle du bouton et du panneau
+    const updateAutoUI = (isAuto) => {
+      autoGameCheckbox.checked = isAuto;
+      if (isAuto) {
+        autoGameBtn.textContent = "DÉSACTIVER LE MODE AUTOMATIQUE";
+        autoGameBtn.className = "btn btn-accent";
+        autoGameBtn.style.boxShadow = "0 0 15px rgba(0, 245, 212, 0.4)";
+        autoGameBtn.style.borderColor = "var(--neon-green)";
+        const panel = document.getElementById('gm-auto-panel');
+        if (panel) panel.style.borderColor = "rgba(0, 245, 212, 0.6)";
+      } else {
+        autoGameBtn.textContent = "ACTIVER LE MODE AUTOMATIQUE";
+        autoGameBtn.className = "btn btn-secondary";
+        autoGameBtn.style.boxShadow = "none";
+        autoGameBtn.style.borderColor = "rgba(255,255,255,0.15)";
+        const panel = document.getElementById('gm-auto-panel');
+        if (panel) panel.style.borderColor = "rgba(0, 210, 255, 0.25)";
+      }
+    };
+
+    // Initialisation au chargement
+    setTimeout(() => {
+      updateAutoUI(autoGameCheckbox.checked);
+    }, 100);
+
+    autoGameBtn.addEventListener('click', async () => {
+      const isAuto = !autoGameCheckbox.checked;
+      updateAutoUI(isAuto);
+      
       localStorage.setItem('cfg_auto_game', isAuto);
       
       const simAuto = document.getElementById('sim-auto-pilot');
@@ -2432,24 +2510,30 @@ function setupGMEventListeners() {
       }
       
       // Activer/Désactiver le minuteur du lobby en base
+      const updateData = { is_auto_mode: isAuto };
       if (gameState && gameState.phase === 'lobby') {
         if (isAuto) {
-          await supabaseClient.from('game_state').update({
-            is_auto_mode: true,
-            timer_duration: 600, // 10 minutes
-            timer_started_at: new Date().toISOString()
-          }).eq('id', 1);
+          updateData.timer_duration = 600; // 10 minutes
+          updateData.timer_started_at = new Date().toISOString();
         } else {
-          await supabaseClient.from('game_state').update({
-            is_auto_mode: false,
-            timer_duration: 0,
-            timer_started_at: null
-          }).eq('id', 1);
+          updateData.timer_duration = 0;
+          updateData.timer_started_at = null;
         }
-      } else {
-        await supabaseClient.from('game_state').update({
-          is_auto_mode: isAuto
-        }).eq('id', 1);
+      }
+
+      console.log("[Auto-Game] Mise à jour en base...", updateData);
+      const { error } = await supabaseClient.from('game_state').update(updateData).eq('id', 1);
+      if (error) {
+        console.error("Erreur de base de données (mode automatique):", error);
+        alert("⚠️ IMPOSSIBLE D'ACTIVER LE MODE AUTOMATIQUE\n\n" +
+              "Avez-vous bien exécuté la requête SQL de migration dans Supabase ?\n" +
+              "Pour corriger cela, allez dans le SQL Editor de Supabase et exécutez la commande suivante :\n\n" +
+              "ALTER TABLE game_state ADD COLUMN IF NOT EXISTS is_auto_mode BOOLEAN DEFAULT FALSE;\n\n" +
+              "Détail de l'erreur : " + error.message);
+        
+        // Annuler visuellement
+        updateAutoUI(!isAuto);
+        if (simAuto) simAuto.disabled = false;
       }
     });
   }
@@ -2777,15 +2861,59 @@ function setupSimulator() {
   });
 }
 
+function calculateDynamicWolves(playerCount) {
+  // Déterminer un nombre de loups de base (environ 15% à 18% des joueurs)
+  let baseWolves = 1;
+  if (playerCount >= 45) {
+    baseWolves = 7;
+  } else if (playerCount >= 35) {
+    baseWolves = 6;
+  } else if (playerCount >= 28) {
+    baseWolves = 5;
+  } else if (playerCount >= 18) {
+    baseWolves = 4;
+  } else if (playerCount >= 12) {
+    baseWolves = 3;
+  } else if (playerCount >= 8) {
+    baseWolves = 2;
+  } else {
+    baseWolves = 1;
+  }
+
+  // Ajouter un petit aléatoire (-1, 0, ou +1)
+  const rand = Math.random();
+  let adjustment = 0;
+  if (rand < 0.2) {
+    adjustment = -1; // 20% de chances d'avoir un loup de moins
+  } else if (rand > 0.8) {
+    adjustment = 1;  // 20% de chances d'avoir un loup de plus
+  }
+
+  let finalWolves = baseWolves + adjustment;
+
+  // Sécuriser les limites pour que le jeu reste jouable
+  const minWolves = 1;
+  const maxWolves = Math.floor(playerCount / 3); // Pas plus d'un tiers de loups
+  finalWolves = Math.max(minWolves, Math.min(finalWolves, maxWolves));
+
+  console.log(`[Auto-Wolves] Joueurs: ${playerCount}, Loups de base: ${baseWolves}, Aléatoire: ${adjustment}, Loups finaux: ${finalWolves}`);
+  return finalWolves;
+}
+
 async function distributeRolesAndStartGame(isAuto = false) {
   if (players.length < 4) {
     if (!isAuto) alert("Il faut au moins 4 joueurs pour lancer une partie.");
     return false;
   }
 
-  // Distribuer les rôles selon la configuration du GM
+  // Distribuer les rôles selon la configuration du GM (ou calcul dynamique en mode automatique)
+  let wolvesCount = configWolvesCount;
+  if (isAuto || (gameState && gameState.is_auto_mode)) {
+    wolvesCount = calculateDynamicWolves(players.length);
+  }
+
   const customRoles = [];
-  for (let i = 0; i < configWolvesCount; i++) {
+  for (let i = 0; i < wolvesCount; i++) {
     customRoles.push('loup');
   }
 

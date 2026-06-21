@@ -130,28 +130,39 @@
 
         <!-- Section: Lobby Setup -->
         <div id="gm-section-lobby" class="gm-section fade-in">
+          
+          <!-- Panneau principal Jeu Automatique (Très en évidence) -->
+          <div class="glass" id="gm-auto-panel" style="padding: 25px; margin-bottom: 25px; border: 2px solid rgba(0, 210, 255, 0.25); border-radius: 12px; background: rgba(0, 210, 255, 0.02); text-align: center; transition: all 0.3s ease;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+              <span style="font-size: 1.5rem;">🤖</span>
+              <h3 style="margin: 0; font-size: 1.25rem; font-weight: 800; letter-spacing: 0.05em; color: #fff;">MODE JEU AUTOMATIQUE</h3>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--color-muted); max-width: 450px; margin: 0 auto 15px auto; line-height: 1.4;">
+              Les sessions s'enchaînent toutes les 10 minutes. Le lobby est complété à 50 joueurs avec des bots, et le jeu se déroule de manière 100% autonome.
+            </p>
+            
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
+              <!-- Input checkbox caché pour assurer la compatibilité JS existante -->
+              <input type="checkbox" id="gm-auto-game" style="display: none;">
+              
+              <!-- Bouton Néon de Bascule -->
+              <button id="btn-gm-toggle-auto" class="btn btn-secondary" style="width: 100%; max-width: 320px; padding: 14px; font-weight: 800; font-size: 0.9rem; letter-spacing: 0.08em; border-radius: 8px; transition: all 0.3s ease; border: 1px solid rgba(255,255,255,0.15);">
+                ACTIVER LE MODE AUTOMATIQUE
+              </button>
+
+              <!-- Compte à rebours du lobby -->
+              <div id="gm-lobby-timer-container" class="hidden" style="width: 100%; max-width: 320px; padding: 12px; background: rgba(0, 210, 255, 0.05); border: 1px dashed var(--neon-blue); border-radius: 8px; margin-top: 5px;">
+                <span style="font-size: 0.7rem; color: var(--color-muted); display: block; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold;">LANCEMENT DE LA SESSION DANS :</span>
+                <span id="gm-lobby-timer-val" style="font-size: 2rem; font-weight: 900; color: var(--neon-blue); text-shadow: 0 0 10px rgba(0,210,255,0.4); display: block; margin-top: 3px;">10:00</span>
+              </div>
+            </div>
+          </div>
+
           <p style="margin-bottom: 20px; color: var(--color-muted);">Attendez que tous les joueurs scannent le QR code et rejoignent le lobby. Une fois que tout le monde est connecté, cliquez sur le bouton ci-dessous pour distribuer les rôles aléatoirement.</p>
           
           <!-- GM Lobby Settings Panel -->
           <div class="glass" style="padding: 20px; margin-bottom: 25px; border-color: rgba(255, 255, 255, 0.1); text-align: left;">
             <h3 class="title-glow" style="font-size: 1.1rem; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">⚙️ Configuration de la Partie</h3>
-            
-            <!-- Mode Jeu Automatique -->
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
-              <div>
-                <strong style="font-size: 0.9rem; color: var(--neon-blue); display: flex; align-items: center; gap: 6px;">🤖 Jeu Automatique</strong>
-                <div style="font-size: 0.75rem; color: var(--color-muted);">Session automatique toutes les 10 minutes</div>
-              </div>
-              <div style="display: flex; align-items: center;">
-                <input type="checkbox" id="gm-auto-game" style="width: auto; cursor: pointer; height: 18px; width: 18px; margin: 0;">
-              </div>
-            </div>
-
-            <!-- GM Auto Lobby timer box -->
-            <div id="gm-lobby-timer-container" class="hidden" style="margin-bottom: 20px; padding: 12px; background: rgba(0, 210, 255, 0.05); border: 1px dashed var(--neon-blue); border-radius: 8px; text-align: center;">
-              <span style="font-size: 0.75rem; color: var(--color-muted); display: block; text-transform: uppercase; letter-spacing: 0.05em;">Lancement auto dans :</span>
-              <span id="gm-lobby-timer-val" style="font-size: 1.6rem; font-weight: 800; color: var(--neon-blue); text-shadow: 0 0 10px rgba(0,210,255,0.3);">10:00</span>
-            </div>
 
             <!-- Wolves count selector -->
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
@@ -223,19 +234,19 @@
                   <input type="checkbox" id="chk-role-chasseur" checked style="width: auto; height: auto;"> Chasseur
                 </label>
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                  <input type="checkbox" id="chk-role-cupidon" checked style="width: auto; height: auto;"> Cupidon
+                  <input type="checkbox" id="chk-role-cupidon" style="width: auto; height: auto;"> Cupidon
                 </label>
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                   <input type="checkbox" id="chk-role-garde" checked style="width: auto; height: auto;"> Garde
                 </label>
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                  <input type="checkbox" id="chk-role-fluteur" checked style="width: auto; height: auto;"> Flûteur
+                  <input type="checkbox" id="chk-role-fluteur" style="width: auto; height: auto;"> Flûteur
                 </label>
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                  <input type="checkbox" id="chk-role-ange" checked style="width: auto; height: auto;"> Ange
+                  <input type="checkbox" id="chk-role-ange" style="width: auto; height: auto;"> Ange
                 </label>
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                  <input type="checkbox" id="chk-role-idiot" checked style="width: auto; height: auto;"> Idiot
+                  <input type="checkbox" id="chk-role-idiot" style="width: auto; height: auto;"> Idiot
                 </label>
                 <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                   <input type="checkbox" id="chk-role-ancien" checked style="width: auto; height: auto;"> Ancien
